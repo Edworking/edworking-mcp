@@ -18,7 +18,7 @@ export function createApp(config: Config, store: Store, api = new Edworking(conf
   app.disable('x-powered-by');
   // Railway appends the client address at its trusted edge. One service replica is required for this SQLite deployment.
   if (config.production) app.set('trust proxy', 1);
-  app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], styleSrc: ["'unsafe-inline'"], imgSrc: ["'self'"], formAction: ["'self'"], frameAncestors: ["'none'"], baseUri: ["'none'"], upgradeInsecureRequests: config.production ? [] : null } }, referrerPolicy: { policy: 'no-referrer' } }));
+  app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], styleSrc: ["'unsafe-inline'"], imgSrc: ["'self'"], formAction: ["'self'"], frameAncestors: ["'none'"], baseUri: ["'none'"], upgradeInsecureRequests: config.production ? [] : null } }, referrerPolicy: { policy: 'same-origin' } }));
   app.get('/healthz', (_req, res) => res.json({ status: 'ok', service: 'bellsprout' }));
   app.get('/readyz', (_req, res) => { try { res.status(store.healthy() ? 200 : 503).json({ status: 'ready' }); } catch { res.status(503).json({ status: 'unavailable' }); } });
   app.use((req, res, next) => {
