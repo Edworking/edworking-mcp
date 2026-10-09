@@ -6,7 +6,7 @@
     "url": "https://github.com/Edworking/edworking-mcp",
     "source": "github"
   },
-  "version": "0.1.2",
+  "version": "0.1.3",
   "remotes": [
     {
       "type": "streamable-http",

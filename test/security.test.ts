@@ -20,11 +20,13 @@ class FakeApi extends Edworking {
   calls: { token: string; query: string; variables: Record<string, unknown> }[] = [];
   revoked = false; failure = false;
   identity = { ...info, scopes: [...info.scopes] };
+  respond?: (query: string, variables: Record<string, unknown>) => Record<string, unknown>;
   constructor() { super('https://unused.example/'); }
   override async tokenInfo(token: string) { if (this.revoked || token !== pat) throw new ApiError('UNAUTHORIZED', 'Revoked'); return { ...this.identity }; }
   override async execute<T>(token: string, query: string, variables: Record<string, unknown> = {}): Promise<T> {
     this.calls.push({ token, query, variables });
     if (this.failure) throw new ApiError('UPSTREAM_UNAVAILABLE', 'Lost response');
+    if (this.respond) return this.respond(query, variables) as T;
     return { apiProjects: [{ id: 'project-A', name: 'Launch' }], apiCreateTask: { id: 'task-A', name: variables.name, projectId: 'project-A' } } as T;
   }
 }
@@ -190,4 +192,107 @@ test('AES-GCM detects tampering and upstream errors never include private respon
   assert.throws(() => new Vault('b'.repeat(64)).open(sealed));
   const fake = (async () => new Response(JSON.stringify({ errors: [{ message: 'SECRET-DATABASE-DETAIL', extensions: { code: 'FORBIDDEN' } }] }))) as typeof fetch;
   await assert.rejects(new Edworking('https://unused.example', fake).execute(pat, 'query { x }'), e => e instanceof ApiError && e.code === 'UNAUTHORIZED' && !e.message.includes('SECRET'));
+});
+
+
+test('default upstream is the public gateway and production rejects cleartext upstreams', () => {
+  const env = { TOKEN_ENCRYPTION_KEY: 'a'.repeat(64), NODE_ENV: 'production', PUBLIC_BASE_URL: 'https://mcp.edworking.com', DATABASE_PATH: '/data/test.sqlite' };
+  assert.equal(readConfig(env).apiUrl, 'https://gateway.edworking.com/');
+  assert.throws(() => readConfig({ ...env, EDWORKING_API_URL: 'http://gateway.edworking.com/' }), /HTTPS/);
+});
+
+test('all 15 tools run through the MCP SDK, reject missing scopes and deduplicate writes', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  const a = await authorize(f, SCOPES.join(' '));
+  const tokens = (await request(f.app).post('/oauth/token').type('form').send(a.body).expect(200)).body;
+  const task = { id: 'task-A', name: 'QA task', projectId: 'project-A', deadline: null, users: [] };
+  f.api.respond = (_query, args) => ({
+    apiProjects: [{ id: 'project-A', name: 'QA project' }], apiProjectStates: [{ id: 'state-A', value: 'Open' }],
+    apiTasks: [task], apiTask: task, apiPrivateChats: [{ id: 'chat-A', name: 'QA private chat' }],
+    apiMessages: [{ id: 'message-A', body: 'QA message' }], apiFiles: [{ id: 'file-A', name: 'QA file' }],
+    apiCreateTask: { ...task, name: args.name }, apiUpdateTask: { ...task, name: args.name ?? task.name, deadline: args.deadline },
+    apiSendMessage: { id: 'message-B', body: args.body }, apiCreateProject: { id: 'project-B', name: args.name },
+    apiUploadFile: { id: 'file-B', name: args.name },
+  });
+  const server = f.app.listen(0, '127.0.0.1'); await new Promise<void>(r => server.once('listening', r));
+  t.after(() => new Promise<void>(r => server.close(() => r())));
+  const address = server.address(); assert.ok(address && typeof address !== 'string');
+  const client = new Client({ name: 'all-tools-test', version: '1.0.0' });
+  await client.connect(new StreamableHTTPClientTransport(new URL('http://127.0.0.1:' + address.port + '/mcp'), { requestInit: { headers: { Authorization: 'Bearer ' + tokens.access_token } } }));
+  t.after(() => client.close());
+  const action = 'a68a95be-8e0f-4c92-a99b-e9c9f5a51b73';
+  const cases: Record<string, Record<string, unknown>> = {
+    get_connection: {}, list_projects: {}, list_project_statuses: { projectId: 'project-A' }, list_tasks: { projectId: 'project-A' },
+    get_task: { id: 'task-A' }, list_conversations: {}, read_messages: { chat: { id: 'chat-A', kind: 'privat' } },
+    list_files: { projectId: 'project-A' }, create_task: { requestId: action, projectId: 'project-A', name: 'QA new task' },
+    update_task: { requestId: action, id: 'task-A', deadline: null }, send_message: { requestId: action, chat: { id: 'chat-A', kind: 'privat' }, body: 'QA send' },
+    create_project: { requestId: action, name: 'QA new project' }, upload_file: { requestId: action, projectId: 'project-A', url: 'https://example.com/test.txt', name: 'QA upload' },
+    search: { query: 'QA task' }, fetch: { id: 'task-A' },
+  };
+  const catalog = await client.listTools();
+  assert.deepEqual(catalog.tools.map(x => x.name).sort(), Object.keys(cases).sort());
+  for (const [name, args] of Object.entries(cases)) {
+    const before = f.api.calls.length, result = await client.callTool({ name, arguments: args });
+    assert.notEqual(result.isError, true, name);
+    assert.ok(result.structuredContent, name);
+    assert.ok(!JSON.stringify(result).includes(pat));
+    if (name !== 'get_connection') assert.equal(f.api.calls.length, before + 1, name);
+    if (toolSpecs.find(x => x.name === name)!.write) {
+      const repeated = await client.callTool({ name, arguments: args });
+      assert.deepEqual(repeated.structuredContent, result.structuredContent, name);
+      assert.equal(f.api.calls.length, before + 1, name + ' retried upstream');
+    }
+  }
+  const context = { api: f.api, identity: { ...f.oauth.authenticate(tokens.access_token), scopes: [] }, store: f.store, config: f.config, vault: new Vault(f.config.encryptionKey) };
+  for (const spec of toolSpecs.filter(x => x.scopes.length)) {
+    const before = f.api.calls.length;
+    await assert.rejects(executeTool(spec, cases[spec.name]!, context), e => e instanceof ApiError && e.code === 'INSUFFICIENT_SCOPE', spec.name);
+    assert.equal(f.api.calls.length, before, spec.name + ' bypassed scope checks');
+  }
+  for (const [name, args] of [
+    ['list_tasks', { limit: 101 }], ['get_task', { id: '../other-workspace' }],
+    ['read_messages', { chat: { id: 'chat-A', kind: 'invalid' } }],
+    ['create_task', { requestId: action, projectId: 'project-A', name: '' }],
+    ['update_task', { requestId: 'd1818b87-676d-443a-b02c-818d3d874a96', id: 'task-A' }],
+    ['upload_file', { requestId: action, projectId: 'project-A', url: 'http://169.254.169.254/latest/meta-data/' }],
+    ['upload_file', { requestId: action, projectId: 'project-A', url: 'https://user:secret@example.com/a' }],
+  ] as const) {
+    const before = f.api.calls.length;
+    const result = await client.callTool({ name, arguments: args });
+    assert.equal(result.isError, true, name); assert.equal(f.api.calls.length, before);
+  }
+  await client.close();
+});
+
+test('search enforces its 500-task and 50-result bounds with explicit coverage', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  const a = await authorize(f), tokens = (await request(f.app).post('/oauth/token').type('form').send(a.body).expect(200)).body;
+  let page = 0;
+  f.api.respond = () => ({ apiTasks: Array.from({ length: 100 }, (_, i) => ({ id: 'task-' + (page * 100 + i), projectId: 'project-A', name: 'matching task' })).map((x, i) => { if (i === 99) page++; return x; }) });
+  const context = { api: f.api, identity: f.oauth.authenticate(tokens.access_token), store: f.store, config: f.config, vault: new Vault(f.config.encryptionKey) };
+  const result = await executeTool(toolSpecs.find(x => x.name === 'search')!, { query: 'matching' }, context);
+  assert.equal((result.results as unknown[]).length, 50);
+  assert.deepEqual(result.coverage, { scannedTasks: 500, complete: false, resultLimit: 50, truncatedMatches: true, searchedFields: ['task name'] });
+  assert.equal(f.api.calls.length, 5); assert.equal(f.api.calls[4]!.variables.after, 'task-399');
+});
+
+test('persistent transports revalidate before cached writes and connection metadata', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  const a = await authorize(f), tokens = (await request(f.app).post('/oauth/token').type('form').send(a.body).expect(200)).body;
+  const context = { api: f.api, identity: f.oauth.authenticate(tokens.access_token), store: f.store, config: f.config, vault: new Vault(f.config.encryptionKey), validateIdentity: async () => { await f.api.tokenInfo(pat); } };
+  const spec = toolSpecs.find(x => x.name === 'create_task')!, args = { requestId: '5cf5089b-23fc-4857-9971-459520aeb722', projectId: 'project-A', name: 'QA private task' };
+  await executeTool(spec, args, context);
+  f.api.revoked = true;
+  await assert.rejects(executeTool(spec, args, context), /Revoked/);
+  await assert.rejects(executeTool(toolSpecs.find(x => x.name === 'get_connection')!, {}, context), /Revoked/);
+  assert.equal(f.api.calls.length, 1);
+});
+
+test('untrusted origins, malformed bodies and oversized requests fail without upstream work', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  await request(f.app).post('/mcp').set('Origin', 'https://evil.example').send({}).expect(403);
+  await request(f.app).post('/mcp').set('Content-Type', 'application/json').send('{invalid').expect(400);
+  await request(f.app).post('/mcp').send({ value: 'x'.repeat(270000) }).expect(413);
+  await request(f.app).post('/mcp').set('Authorization', 'Bearer ' + pat).send({}).expect(401);
+  assert.equal(f.api.calls.length, 0);
 });

@@ -73,7 +73,7 @@ Use the included Dockerfile, attach a volume at `/data`, and set:
 | `PUBLIC_BASE_URL` | Stable public HTTPS origin, without `/mcp` |
 | `DATABASE_PATH` | `/data/bellsprout.sqlite` |
 | `TOKEN_ENCRYPTION_KEY` | Random 32-byte key encoded as 64 hex characters |
-| `EDWORKING_API_URL` | `https://venusaur.edworking.com/` |
+| `EDWORKING_API_URL` | `https://gateway.edworking.com/` |
 | `EDWORKING_APP_URL` | `https://app.edworking.com` |
 
 Keep one replica, sleeping off and deployment overlap zero. `/healthz` checks the process and `/readyz` checks SQLite. Preserve the key across deployments. Optional `ALLOWED_ORIGINS` adds exact browser origins, `OPENAI_DOMAIN_CHALLENGE` serves the OpenAI verification value, and `EDWORKING_CONNECT_URL` enables a native Edworking connection page only after that page has shipped.

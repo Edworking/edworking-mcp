@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3 — 2026-10-09
+
+- Use `https://gateway.edworking.com/` as the default and production Edworking API endpoint.
+- Revalidate local stdio token access before every tool call, including cached writes and connection metadata.
+- Expand regression coverage to all 15 tools, scope denial, input validation, write deduplication, bounded search and transport request protections.
+- Live public-endpoint checks passed; authenticated workspace testing and directory submissions remain pending.
+
 ## 0.1.2 — 2026-10-09
 
 - Match Edworking’s website branding and add setup guidance for eleven client options.

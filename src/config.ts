@@ -20,7 +20,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (url.pathname !== '/' || url.search || url.hash || url.username || url.password) throw new Error('PUBLIC_BASE_URL must be an origin');
   if (production && url.protocol !== 'https:') throw new Error('HTTPS required in production');
   const encryptionKey = z.string().regex(/^[a-fA-F0-9]{64}$/).parse(env.TOKEN_ENCRYPTION_KEY);
-  const apiUrl = z.url().parse(env.EDWORKING_API_URL || 'https://venusaur.edworking.com/');
+  const apiUrl = z.url().parse(env.EDWORKING_API_URL || 'https://gateway.edworking.com/');
   const appUrl = z.url().parse(env.EDWORKING_APP_URL || 'https://app.edworking.com');
   if (production && new URL(apiUrl).protocol !== 'https:') throw new Error('Upstream HTTPS required');
   const connectUrl = env.EDWORKING_CONNECT_URL;
