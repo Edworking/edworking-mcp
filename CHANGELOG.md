@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2 — 2026-10-09
+
+- Match Edworking’s website branding and add setup guidance for eleven client options.
+- Support native OAuth clients using ephemeral IP loopback callback ports, while retaining exact paths, queries and token-exchange redirect binding.
+- Publish a competitor capability review and prioritized delivery roadmap.
+- The custom domain is active; the new Charmeleon integration guide is available in six languages.
+
 ## 0.1.1 — 2026-10-09
 
 - Public branding, landing page, repository and plugin identity changed to Edworking MCP. Railway retains the Bellsprout infrastructure name.

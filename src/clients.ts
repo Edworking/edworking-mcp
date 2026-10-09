@@ -12,6 +12,17 @@ export function validRedirect(value: string) {
     return safeHost && !url.username && !url.password && !url.hash && (url.protocol === 'https:' || (url.protocol === 'http:' && ['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname)));
   } catch { return false; }
 }
+/** RFC 8252: native clients choose an ephemeral port on an IP loopback callback. */
+export function matchesRedirect(registered: string, requested: string) {
+  if (!validRedirect(registered) || !validRedirect(requested)) return false;
+  if (registered === requested) return true;
+  const expected = new URL(registered), actual = new URL(requested);
+  if (expected.protocol !== 'http:' || actual.protocol !== 'http:' || !['127.0.0.1', '[::1]'].includes(expected.hostname)) return false;
+  // Compare the original URI strings after removing only the authority's port.
+  // Do not normalize paths, queries, host spellings, or trailing slashes.
+  const withoutPort = (uri: string) => uri.replace(/^(http:\/\/(?:127\.0\.0\.1|\[::1\]))(?::[0-9]+)?(?=\/|\?|$)/, '$1');
+  return withoutPort(registered) === withoutPort(requested);
+}
 const metadata = z.object({
   client_name: z.string().min(1).max(100).default('MCP client'),
   redirect_uris: z.array(z.string().max(2048).refine(validRedirect)).min(1).max(10),
