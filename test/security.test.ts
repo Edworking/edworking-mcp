@@ -19,8 +19,9 @@ const info = { id: 'token-A', name: 'My assistant', userId: 'user-A', teamId: 't
 class FakeApi extends Edworking {
   calls: { token: string; query: string; variables: Record<string, unknown> }[] = [];
   revoked = false; failure = false;
+  identity = { ...info, scopes: [...info.scopes] };
   constructor() { super('https://unused.example/'); }
-  override async tokenInfo(token: string) { if (this.revoked || token !== pat) throw new ApiError('UNAUTHORIZED', 'Revoked'); return { ...info }; }
+  override async tokenInfo(token: string) { if (this.revoked || token !== pat) throw new ApiError('UNAUTHORIZED', 'Revoked'); return { ...this.identity }; }
   override async execute<T>(token: string, query: string, variables: Record<string, unknown> = {}): Promise<T> {
     this.calls.push({ token, query, variables });
     if (this.failure) throw new ApiError('UPSTREAM_UNAVAILABLE', 'Lost response');
@@ -40,6 +41,9 @@ async function begin(f: ReturnType<typeof fixture>, scope = 'projects:read tasks
   const id = new URL(response.headers.location, f.config.origin).searchParams.get('request')!;
   const page = await browser.get(response.headers.location).expect(200);
   assert.ok(!page.text.includes('<script>client</script>'));
+  const policy = page.headers['content-security-policy'];
+  assert.match(policy, /(?:^|;)form-action 'self' https:\/\/client\.example(?:;|$)/);
+  assert.match(policy, /(?:^|;)default-src 'none'(?:;|$)/);
   const csrf = page.text.match(/name="csrf" value="([^"]+)"/)![1];
   return { client, browser, verifier, params, id, csrf };
 }
@@ -86,6 +90,27 @@ test('code replay, explicit revocation and upstream revocation block access', as
     await request(f.app).post('/mcp').set('Authorization', `Bearer ${tokens.access_token}`).send({}).expect(401);
   }
 });
+test('refresh revokes grants when upstream token, owner, workspace or permissions change', async t => {
+  for (const changed of [{ id: 'token-B' }, { userId: 'user-B' }, { teamId: 'team-B' }, { scopes: ['projects:read'] }]) {
+    const f = fixture(); t.after(() => f.store.close());
+    const a = await authorize(f), tokens = (await request(f.app).post('/oauth/token').type('form').send(a.body).expect(200)).body;
+    Object.assign(f.api.identity, changed);
+    await request(f.app).post('/oauth/token').type('form').send({ grant_type: 'refresh_token', client_id: a.client.client_id, resource: f.config.resource, refresh_token: tokens.refresh_token }).expect(400);
+    assert.throws(() => f.oauth.authenticate(tokens.access_token));
+  }
+});
+test('unconfigured native handoff is unavailable and OAuth cancellation preserves state', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  await request(f.app).get('/oauth/request').expect(404);
+  await request(f.app).post('/oauth/link').send({}).expect(404);
+  const b = await begin(f);
+  const denied = await b.browser.post('/oauth/approve').set('Origin', f.config.origin).type('form').send({ request: b.id, csrf: b.csrf, decision: 'deny' }).expect(303);
+  const callback = new URL(denied.headers.location);
+  assert.equal(callback.origin, 'https://client.example');
+  assert.equal(callback.searchParams.get('error'), 'access_denied');
+  assert.equal(callback.searchParams.get('state'), 'client-state');
+  await b.browser.get(`/oauth/consent?request=${b.id}`).expect(400);
+});
 test('SQLite survives restarts, excludes raw credentials, enforces expiry and rolls back', async t => {
   const folder = mkdtempSync(join(tmpdir(), 'bellsprout-')), path = join(folder, 'data.sqlite');
   t.after(() => rmSync(folder, { recursive: true, force: true }));
@@ -127,7 +152,7 @@ test('write retry returns encrypted cached result; changed arguments and uncerta
 });
 test('client registration, CIMD identity and public-address checks reject unsafe metadata', async t => {
   const store = new Store(':memory:'); t.after(() => store.close());
-  for (const uri of ['javascript:alert(1)', 'https://user:password@example.com/cb', 'https://example.com/cb#fragment', 'http://example.com/cb']) assert.equal(validRedirect(uri), false);
+  for (const uri of ['javascript:alert(1)', 'https://user:password@example.com/cb', 'https://example.com/cb#fragment', 'http://example.com/cb', 'https://example.com;style-src/cb']) assert.equal(validRedirect(uri), false);
   assert.equal(validRedirect('http://127.0.0.1:8912/callback'), true);
   const clients = new Clients(store, async () => ({ client_id: 'https://wrong.example/metadata.json', redirect_uris: ['https://client.example/cb'] }));
   await assert.rejects(clients.get('https://client.example/metadata.json'));
