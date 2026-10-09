@@ -2,7 +2,7 @@
 
 Report suspected vulnerabilities privately through https://edworking.com. Do not include credentials, exploit details or private workspace data in public issues. Maintainers should enable GitHub private vulnerability reporting.
 
-- Every grant is bound to one client, resource URL and scoped Edworking API token. Edworking validates owner/workspace access on every MCP request.
+- Every grant is bound to one client, resource URL and scoped Edworking API token. Edworking validates owner/workspace access on every hosted MCP request. Local stdio revalidates token identity and permissions before every tool call, including cached results.
 - Codes require PKCE S256 and exact redirects. Native HTTP IP-loopback registrations allow only the port to vary (RFC 8252); token exchange remains bound to the exact redirect used at authorization. Consent requires a short-lived HttpOnly SameSite cookie, exact Origin and CSRF token.
 - OAuth credentials are opaque and hashed at rest. Refresh rotation detects reuse and revokes the grant family. Upstream credentials and cached write results use AES-256-GCM.
 - HTTPS client-metadata retrieval rejects private IPs, pins DNS, disallows redirects and limits size/time. File downloading is delegated to Edworking's existing guarded downloader.
