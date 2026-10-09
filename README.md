@@ -4,7 +4,7 @@ The official, open-source [Edworking](https://edworking.com) MCP server. Connect
 
 **Hosted endpoint:** `https://mcp.edworking.com/mcp`
 
-**Domain activation:** `mcp.edworking.com` is the intended public origin. Until DNS/TLS activation is complete, use the endpoint displayed on [the running service](https://bellsprout-production.up.railway.app/). Do not submit directory manifests until the custom domain is verified.
+**Public identity:** Edworking MCP. The Railway infrastructure retains the codename **Bellsprout**. Use the custom domain above for all new connections. Connections created against the earlier Railway URL must reconnect because their OAuth resource audience has changed.
 
 **Status:** initial release. Deployment does not imply OpenAI or directory approval. See [publication checklist](docs/distribution.md).
 
