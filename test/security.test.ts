@@ -41,6 +41,9 @@ async function begin(f: ReturnType<typeof fixture>, scope = 'projects:read tasks
   const id = new URL(response.headers.location, f.config.origin).searchParams.get('request')!;
   const page = await browser.get(response.headers.location).expect(200);
   assert.ok(!page.text.includes('<script>client</script>'));
+  // no-referrer makes browsers send Origin:null for HTML form POSTs.
+  assert.equal(page.headers['referrer-policy'], 'same-origin');
+  assert.match(page.text, /name="referrer" content="same-origin"/);
   const policy = page.headers['content-security-policy'];
   assert.match(policy, /(?:^|;)form-action 'self' https:\/\/client\.example(?:;|$)/);
   assert.match(policy, /(?:^|;)default-src 'none'(?:;|$)/);
@@ -64,6 +67,7 @@ test('OAuth enforces PKCE, exact redirects, resource audience, browser binding a
   await request(f.app).get(`/oauth/consent?request=${b.id}`).expect(400);
   await b.browser.post('/oauth/link-token').set('Origin', f.config.origin).type('form').send({ request: b.id, csrf: 'wrong', api_token: pat }).expect(400);
   await b.browser.post('/oauth/link-token').set('Origin', 'https://evil.example').type('form').send({ request: b.id, csrf: b.csrf, api_token: pat }).expect(403);
+  await b.browser.post('/oauth/approve').set('Origin', 'null').type('form').send({ request: b.id, csrf: b.csrf, decision: 'deny' }).expect(403);
   await request(f.app).post('/mcp').send({}).expect(401).expect('WWW-Authenticate', /oauth-protected-resource\/mcp/);
 });
 test('authorization codes and refresh tokens are single-use; replay revokes the family', async t => {
