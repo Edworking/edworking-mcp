@@ -8,6 +8,8 @@ export class Store {
   constructor(path: string) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path);
+    // Set permissions before creating WAL/journal files, which inherit the DB mode.
+    if (path !== ':memory:') chmodSync(path, 0o600);
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS records (kind TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, expiry INTEGER NOT NULL, PRIMARY KEY(kind,id)); CREATE INDEX IF NOT EXISTS record_expiry ON records(expiry);');
     if (path !== ':memory:') chmodSync(path, 0o600);
   }

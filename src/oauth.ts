@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Config } from './config.js';
 import { SCOPES, READ_SCOPES } from './config.js';
 import { Store } from './store.js';
-import { Clients } from './clients.js';
+import { Clients, validRedirect } from './clients.js';
 import { Edworking, ApiError, type TokenInfo } from './edworking.js';
 import { Vault, hash, random, equal, challenge } from './crypto.js';
 import { consent, page } from './pages.js';
@@ -49,6 +49,13 @@ export class OAuth {
   private view(p: Pending, error?: string) {
     return consent(this.config, { ...p, name: p.info?.name, expiresAt: p.info?.expiresAt }, error);
   }
+  private sendView(res: Response, p: Pending, error?: string) {
+    // Browsers can apply form-action to the POST's redirect as well. Permit
+    // only this registered client's origin while retaining the other CSP rules.
+    const policy = String(res.getHeader('Content-Security-Policy') || '');
+    res.set('Content-Security-Policy', policy.replace(/form-action[^;]*/, `form-action 'self' ${new URL(p.redirect).origin}`));
+    res.type('html').send(this.view(p, error));
+  }
   private async link(p: Pending, token: string) {
     const info = await this.api.tokenInfo(token);
     if (p.scopes.some(scope => !info.scopes.includes(scope))) throw new OAuthError('invalid_scope', 'The Edworking token does not include all requested permissions. Create a token with the permissions shown above.');
@@ -58,7 +65,7 @@ export class OAuth {
     this.store.set('pending', p.id, { ...current, info, upstream: this.vault.seal(token) }, p.expires);
   }
   authenticate(token: string): Identity {
-    if (!/^bsp_at_[A-Za-z0-9_-]{43}$/.test(token)) throw new OAuthError('invalid_token', 'A Bellsprout access token is required.', 401);
+    if (!/^bsp_at_[A-Za-z0-9_-]{43}$/.test(token)) throw new OAuthError('invalid_token', 'An Edworking MCP access token is required.', 401);
     const record = this.store.get<Credential>('access', hash(token));
     const grant = record && this.store.get<Grant>('grant', record.grantId);
     if (!record || !grant || grant.revoked || record.resource !== this.config.resource || grant.resource !== this.config.resource || record.clientId !== grant.clientId) throw new OAuthError('invalid_token', 'Reconnect Edworking to continue.', 401);
@@ -88,7 +95,7 @@ export class OAuth {
       code_challenge_methods_supported: ['S256'], scopes_supported: SCOPES,
       client_id_metadata_document_supported: true, authorization_response_iss_parameter_supported: true,
     }));
-    const resourceMetadata = (_req: Request, res: Response) => res.json({ resource: config.resource, resource_name: 'Edworking — Bellsprout', authorization_servers: [config.origin], scopes_supported: READ_SCOPES, bearer_methods_supported: ['header'], resource_documentation: `${config.origin}/`, resource_policy_uri: `${config.origin}/privacy`, resource_tos_uri: `${config.origin}/terms` });
+    const resourceMetadata = (_req: Request, res: Response) => res.json({ resource: config.resource, resource_name: 'Edworking MCP', authorization_servers: [config.origin], scopes_supported: READ_SCOPES, bearer_methods_supported: ['header'], resource_documentation: `${config.origin}/`, resource_policy_uri: `${config.origin}/privacy`, resource_tos_uri: `${config.origin}/terms` });
     r.get('/.well-known/oauth-protected-resource', resourceMetadata);
     r.get('/.well-known/oauth-protected-resource/mcp', resourceMetadata);
     r.post('/oauth/register', budget(10), (req, res) => {
@@ -101,9 +108,9 @@ export class OAuth {
       catch { throw new OAuthError('invalid_client', 'Unable to validate the OAuth client.'); }
       if (!client) throw new OAuthError('invalid_client', 'Register the OAuth client first.');
       const redirect = asString(req.query.redirect_uri);
-      if (!client.redirect_uris.includes(redirect)) throw new OAuthError('invalid_request', 'The redirect URI does not exactly match the client registration.');
+      if (!validRedirect(redirect) || !client.redirect_uris.includes(redirect)) throw new OAuthError('invalid_request', 'The redirect URI does not exactly match the client registration.');
       if (req.query.response_type !== 'code' || req.query.code_challenge_method !== 'S256' || !opaque.safeParse(req.query.code_challenge).success) throw new OAuthError('invalid_request', 'Authorization code flow with PKCE S256 is required.');
-      if (req.query.resource !== config.resource) throw new OAuthError('invalid_target', 'Use the Bellsprout MCP resource URL.');
+      if (req.query.resource !== config.resource) throw new OAuthError('invalid_target', 'Use the Edworking MCP resource URL.');
       if (req.query.state !== undefined && (typeof req.query.state !== 'string' || req.query.state.length > 2048)) throw new OAuthError('invalid_request', 'Invalid state.');
       const scopes = req.query.scope === undefined ? [...READ_SCOPES] : parseScopes(req.query.scope);
       const session = random(), id = random(), expires = Date.now() + 600_000;
@@ -112,19 +119,21 @@ export class OAuth {
       res.cookie(this.cookie, session, { httpOnly: true, secure: config.production, sameSite: 'lax', maxAge: 600_000, path: '/' });
       res.redirect(303, `/oauth/consent?request=${id}`);
     });
-    r.get('/oauth/consent', (req, res) => { const p = this.pending(asString(req.query.request)); this.browser(req, p); res.type('html').send(this.view(p)); });
+    r.get('/oauth/consent', (req, res) => { const p = this.pending(asString(req.query.request)); this.browser(req, p); this.sendView(res, p); });
     r.post('/oauth/link-token', budget(10), async (req, res) => {
       const p = this.pending(asString(req.body.request)); this.browser(req, p, true);
       try { await this.link(p, asString(req.body.api_token)); res.redirect(303, `/oauth/consent?request=${p.id}`); }
-      catch (e) { if (e instanceof ApiError || e instanceof OAuthError) res.status(400).type('html').send(this.view(p, e.message)); else throw e; }
+      catch (e) { if (e instanceof ApiError || e instanceof OAuthError) { res.status(400); this.sendView(res, p, e.message); } else throw e; }
     });
     // Native Edworking connection UI uses a one-use capability; final consent remains bound to this browser.
     r.get('/oauth/request', budget(30), (req, res) => {
+      if (!config.connectUrl) { res.status(404).json({ error: 'not_found' }); return; }
       const p = this.pending(asString(req.query.request));
       if (!equal(asString(req.query.nonce), p.linkNonce)) throw deny();
       res.json({ clientName: p.clientName, redirectOrigin: new URL(p.redirect).origin, scopes: p.scopes, expiresAt: new Date(p.expires).toISOString() });
     });
     r.post('/oauth/link', budget(10), async (req, res) => {
+      if (!config.connectUrl) { res.status(404).json({ error: 'not_found' }); return; }
       if (req.get('origin') !== new URL(config.appUrl).origin) throw deny();
       const p = this.pending(asString(req.body.request));
       if (!equal(asString(req.body.nonce), p.linkNonce)) throw deny();
@@ -163,7 +172,10 @@ export class OAuth {
       if (scopes.some(s => !record.scopes.includes(s))) throw new OAuthError('invalid_scope', 'Refresh cannot expand permissions.');
       // Verify current owner, workspace membership, revocation, and expiry before refreshing.
       if (!isCode) {
-        try { await this.api.tokenInfo(this.vault.open(grant.upstream)); }
+        try {
+          const current = await this.api.tokenInfo(this.vault.open(grant.upstream));
+          if (current.id !== grant.info.id || current.userId !== grant.info.userId || current.teamId !== grant.info.teamId || scopes.some(s => !current.scopes.includes(s))) throw new ApiError('UNAUTHORIZED', 'The connection changed.');
+        }
         catch (e) { if (e instanceof ApiError && e.code === 'UNAUTHORIZED') { this.revokeGrant(grant.id); throw deny('Edworking access was revoked.'); } throw new OAuthError('temporarily_unavailable', 'Edworking is unavailable. Try again later.', 503); }
       }
       let replay = false;
