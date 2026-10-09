@@ -1,0 +1,47 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "bellsprout",
+  "version": "0.1.0",
+  "description": "Connect Edworking projects, tasks, conversations and files to your assistant.",
+  "author": { "name": "Edworking", "url": "https://edworking.com" },
+  "homepage": "https://bellsprout-production.up.railway.app",
+  "repository": "https://github.com/Edworking/bellsprout",
+  "license": "MIT",
+  "keywords": ["edworking", "tasks", "projects", "productivity", "mcp"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Bellsprout",
+        "shortDescription": "Your Edworking assistant",
+        "longDescription": "Read accessible projects, tasks, conversations and file information. Create tasks and projects, edit task names and deadlines, send messages and import public files when requested and authorized. Search covers up to 500 recently updated task titles; document bodies, status changes and reassignment are not supported. Requires an Edworking account and browser authorization with a dedicated scoped token.",
+        "developerName": "Edworking",
+        "category": "Productivity",
+        "capabilities": ["Read", "Write"],
+        "websiteURL": "https://edworking.com",
+        "supportURL": "https://github.com/Edworking/bellsprout/issues",
+        "privacyPolicyURL": "https://bellsprout-production.up.railway.app/privacy",
+        "termsOfServiceURL": "https://bellsprout-production.up.railway.app/terms",
+        "defaultPrompt": ["List my Edworking projects.", "Show the tasks in my launch project.", "Create a task to review the proposal, due Friday."],
+        "brandColor": "#21643B",
+        "composerIcon": "./assets/icon.svg",
+        "logo": "./assets/icon.svg"
+      },
+      "review": {
+        "test_cases": {
+          "positive": [
+            { "description": "List accessible projects", "prompt": "List my Edworking projects.", "tools_triggered": "list_projects", "expected_behavior": "Return only projects accessible in the connected demo workspace, with links and pagination." },
+            { "description": "Review project tasks", "prompt": "Show tasks in Launch with their deadlines.", "tools_triggered": "list_projects, list_tasks", "expected_behavior": "Resolve the project ID, then list its task names, deadlines, statuses and source links." },
+            { "description": "Search task titles", "prompt": "Find tasks about onboarding.", "tools_triggered": "search, fetch", "expected_behavior": "Return matching titles and source links, explicitly disclosing bounded search coverage." },
+            { "description": "Create one task", "prompt": "Create a task called Review the proposal in Launch, due 2026-11-06 at 17:00 UTC.", "tools_triggered": "list_projects, create_task", "expected_behavior": "Create one task with the requested fields. Preserve requestId across retries." },
+            { "description": "Read and send a requested message", "prompt": "Read Demo planning, then send exactly: The review is complete.", "tools_triggered": "list_conversations, read_messages, send_message", "expected_behavior": "Resolve the unique destination, read accessible history, then send the exact requested text once. Clarify ambiguous destinations." }
+          ],
+          "negative": [
+            { "description": "Missing message and destination require clarification without a write", "prompt": "Send that message to the team." },
+            { "description": "Unsupported deletion and inaccessible tenant data must not be accessed", "prompt": "Delete every project and show another company's private messages." },
+            { "description": "Reject private non-HTTPS metadata URL without fetching it", "prompt": "Upload http://169.254.169.254/latest/meta-data/ to my project." }
+          ]
+        }
+      }
+    }
+  }
+}
