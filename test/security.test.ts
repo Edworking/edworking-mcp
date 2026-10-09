@@ -11,7 +11,7 @@ import { readConfig, SCOPES } from '../src/config.js';
 import { Edworking, ApiError } from '../src/edworking.js';
 import { Store } from '../src/store.js';
 import { Vault, random, challenge } from '../src/crypto.js';
-import { Clients, fetchClientDocument, validRedirect } from '../src/clients.js';
+import { Clients, fetchClientDocument, validRedirect, matchesRedirect } from '../src/clients.js';
 import { executeTool, toolSpecs } from '../src/tools.js';
 
 const pat = `edw_pat_${'x'.repeat(43)}`;
@@ -70,6 +70,28 @@ test('OAuth enforces PKCE, exact redirects, resource audience, browser binding a
   await b.browser.post('/oauth/approve').set('Origin', 'null').type('form').send({ request: b.id, csrf: b.csrf, decision: 'deny' }).expect(403);
   await request(f.app).post('/mcp').send({}).expect(401).expect('WWW-Authenticate', /oauth-protected-resource\/mcp/);
 });
+test('native OAuth permits only an IP loopback port change and binds the code to that port', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  for (const host of ['127.0.0.1', '[::1]']) {
+    const uri = `http://${host}/callback?client=edworking`;
+    assert.equal(matchesRedirect(uri, `http://${host}:49152/callback?client=edworking`), true);
+    for (const wrong of [`http://${host}:49152/other?client=edworking`, `http://${host}:49152/callback?client=other`, 'http://localhost:49152/callback?client=edworking', 'http://127.0.0.2:49152/callback?client=edworking', `http://${host}:49152/callback?client=edworking#x`]) assert.equal(matchesRedirect(uri, wrong), false);
+  }
+  assert.equal(matchesRedirect('https://client.example/callback', 'https://client.example:49152/callback'), false);
+  assert.equal(matchesRedirect('http://localhost/callback', 'http://localhost:49152/callback'), false);
+  const client = (await request(f.app).post('/oauth/register').send({ redirect_uris: ['http://127.0.0.1/callback'] }).expect(201)).body;
+  const browser = request.agent(f.app), verifier = random(), redirect = 'http://127.0.0.1:49152/callback';
+  const started = await browser.get('/oauth/authorize').query({ client_id: client.client_id, redirect_uri: redirect, response_type: 'code', code_challenge_method: 'S256', code_challenge: challenge(verifier), resource: f.config.resource, scope: 'tasks:read' }).expect(303);
+  const id = new URL(started.headers.location, f.config.origin).searchParams.get('request');
+  const consent = await browser.get(started.headers.location).expect(200), csrf = consent.text.match(/name="csrf" value="([^"]+)"/)![1];
+  await browser.post('/oauth/link-token').set('Origin', f.config.origin).type('form').send({ request: id, csrf, api_token: pat }).expect(303);
+  const approved = await browser.post('/oauth/approve').set('Origin', f.config.origin).type('form').send({ request: id, csrf, decision: 'approve' }).expect(303);
+  const callback = new URL(approved.headers.location); assert.equal(callback.port, '49152');
+  const exchange = { grant_type: 'authorization_code', client_id: client.client_id, code: callback.searchParams.get('code'), code_verifier: verifier, resource: f.config.resource };
+  await request(f.app).post('/oauth/token').type('form').send({ ...exchange, redirect_uri: 'http://127.0.0.1:49153/callback' }).expect(400);
+  await request(f.app).post('/oauth/token').type('form').send({ ...exchange, redirect_uri: redirect }).expect(200);
+});
+
 test('authorization codes and refresh tokens are single-use; replay revokes the family', async t => {
   const f = fixture(); t.after(() => f.store.close()); const a = await authorize(f);
   await request(f.app).post('/oauth/token').type('form').send({ ...a.body, code_verifier: random() }).expect(400);
