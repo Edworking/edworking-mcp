@@ -23,6 +23,8 @@ For ChatGPT testing, use **Plugins → Add custom MCP server**, select OAuth and
 
 Other clients should configure a remote HTTP server named `edworking-mcp` and use their built-in OAuth flow. Public clients with PKCE, dynamic registration and HTTPS Client ID Metadata Documents are supported. `/mcp` accepts only Edworking MCP access tokens.
 
+Client setup instructions: [Edworking MCP guide](https://edworking.com/integrations/mcp). See the [competitor review and delivery roadmap](docs/competitive-roadmap.md) for remaining capabilities and launch gates.
+
 ## Tools
 
 | Tool | Scope | Purpose |
