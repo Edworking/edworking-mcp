@@ -5,6 +5,7 @@
 - Public branding, landing page, repository and plugin identity changed to Edworking MCP. Railway retains the Bellsprout infrastructure name.
 - Prepared canonical domain `mcp.edworking.com`; activation requires DNS/TLS verification and a matching OAuth issuer configuration. Existing grants require reconnection after origin migration.
 - Consent CSP permits redirects only to the registered client origin.
+- Same-origin referrer policy preserves the Origin header on consent form submissions without sending referrers to other origins.
 - Refresh checks now verify current token identity, user, workspace and scopes.
 - Native handoff routes are disabled until the native connection page is configured.
 - SQLite permissions are set before WAL creation.
