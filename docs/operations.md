@@ -1,6 +1,6 @@
 # Operations
 
-Repository and service name: **bellsprout**. Production runs one Node 24 container with a persistent SQLite volume at `/data`. Keep one replica, one region, sleeping off and deployment overlap zero.
+Public product: **Edworking MCP**. Repository: **Edworking/edworking-mcp**. Railway project and service: **bellsprout**. Production runs one Node 24 container with a persistent SQLite volume at `/data`. Keep one replica, one region, sleeping off and deployment overlap zero.
 
 Before release, run `npm ci` and `npm run check`, review dependency audits and check for secrets in tracked files. Deploy the tested commit. Verify `/readyz`, OAuth metadata, the unauthenticated MCP challenge and browser consent. Mocked tests do not replace a real connection test against a dedicated Edworking workspace.
 
@@ -11,3 +11,7 @@ Rollback application code while preserving the database and key. Schema migratio
 Monitor readiness, error rates, OAuth failures, memory and disk capacity. Logs contain event/tool names, outcomes and durations only. Do not enable external payload/header capture. For multiple replicas, first migrate atomic grants and mutation reservations to Postgres and use a distributed rate limiter.
 
 The native Edworking handoff endpoints require a short-lived capability and fixed Edworking Origin, followed by consent in the initiating browser. Leave `EDWORKING_CONNECT_URL` unset until a corresponding Charizard page is deployed and tested.
+
+## Public domain migration
+
+Attach `mcp.edworking.com` to the Railway service on port 3000. Replace the existing Vercel CNAME with Railway’s required CNAME and add its ownership TXT record. Once DNS and TLS are verified, set `PUBLIC_BASE_URL=https://mcp.edworking.com` and redeploy. Verify issuer, resource metadata, unauthenticated MCP challenge and a real OAuth connection. Existing connections must reconnect because their resource audience changes. Keep the encryption key and `/data/bellsprout.sqlite` unchanged; internal cookie names and AES-GCM associated data intentionally retain the infrastructure codename.

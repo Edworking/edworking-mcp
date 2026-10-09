@@ -8,8 +8,8 @@ ZIP the contents of `plugin/` at the archive root and upload to https://platform
 
 Before submission:
 
-1. Verify Edworking's business publishing identity and the operator's `api.apps.write` permission. Use an OpenAI project with global data residency; current docs exclude EU-residency projects from MCP review.
-2. Choose the final origin, preferably `mcp.edworking.com`, before public review. Changing origin after publication requires a new plugin. Configure DNS, update manifests and `PUBLIC_BASE_URL` together.
+1. Verify Edworking's business publishing identity. The submitter must be an organization owner or have Apps Management Write.
+2. Activate `mcp.edworking.com` and verify OAuth before review. OpenAI's current update flow does not support MCP URL changes; later changes require contacting support.
 3. Set the portal's `OPENAI_DOMAIN_CHALLENGE`, verify ownership, connect through OAuth and scan tools.
 4. Create a dedicated reviewer account and synthetic workspace with no external MFA/email/SMS approvals. Provide credentials privately in the portal, never in this repository or ZIP.
 5. Run five positive and three negative cases below, record outcomes and supply an accessible demonstration video URL.
@@ -27,13 +27,16 @@ Sources: [package format](https://developers.openai.com/plugins/build/plugins), 
 
 | Destination | Prepared | Remaining action |
 | --- | --- | --- |
-| Official MCP Registry | `server.json`, source, remote URL | Authenticate ownership of `io.github.Edworking`, validate and publish using https://github.com/modelcontextprotocol/registry |
-| Smithery | Remote URL and public server card | Submit at https://smithery.ai and complete ownership/connection checks; https://smithery.ai/docs/build/publish |
+| Official MCP Registry | `server.json`, source, remote URL | Follow https://modelcontextprotocol.io/registry/quickstart; authenticate ownership of `io.github.Edworking`, then run `mcp-publisher publish`. Remote-only servers do not need an npm release. |
+| Smithery | Remote URL and public server card | Submit `https://mcp.edworking.com/mcp` at https://smithery.ai/new and complete OAuth/ownership checks; https://smithery.ai/docs/build/publish |
 | Glama | `glama.json`, README and license | Add the repository at https://glama.ai/mcp/servers; https://glama.ai/mcp/faq |
 | PulseMCP | Source, endpoint and description | Submit at https://www.pulsemcp.com/submit |
 | Awesome Remote MCP Servers | OAuth endpoint and source | Follow https://github.com/punkpeye/awesome-remote-mcp-servers contribution rules after real-client testing |
+| Awesome MCP Servers | Public source and setup guide | Propose a listing PR at https://github.com/punkpeye/awesome-mcp-servers following its contribution rules |
 | npm | Package and stdio entry point | Authenticate an authorized npm publisher, inspect `npm pack`, then publish |
 
-Listing copy: **Bellsprout by Edworking connects AI assistants to workspace projects, tasks, conversations and files, with scoped OAuth access, source links and safe retries for writes.**
+Listing copy: **Edworking MCP connects AI assistants to your projects, tasks, conversations and files. Read workspace context and take requested actions with scoped OAuth access and links back to Edworking.**
+
+Repository: https://github.com/Edworking/edworking-mcp. Website: https://mcp.edworking.com. Endpoint: https://mcp.edworking.com/mcp. Public name: **Edworking MCP**. Infrastructure codename: **Bellsprout**. Metadata is prepared; directory publication has not been completed.
 
 Recommended next work: native consent/workspace selection, real-client evaluation fixtures, uptime alerts, tested backups and independent OAuth review. Expand Venusaur's scoped search/document APIs before adding corresponding tools. Optional MCP Apps task cards can follow; core tools do not require UI widgets. Move to Postgres only when multiple replicas are needed.
