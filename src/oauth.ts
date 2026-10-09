@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Config } from './config.js';
 import { SCOPES, READ_SCOPES } from './config.js';
 import { Store } from './store.js';
-import { Clients, validRedirect } from './clients.js';
+import { Clients, matchesRedirect } from './clients.js';
 import { Edworking, ApiError, type TokenInfo } from './edworking.js';
 import { Vault, hash, random, equal, challenge } from './crypto.js';
 import { consent, page } from './pages.js';
@@ -108,7 +108,7 @@ export class OAuth {
       catch { throw new OAuthError('invalid_client', 'Unable to validate the OAuth client.'); }
       if (!client) throw new OAuthError('invalid_client', 'Register the OAuth client first.');
       const redirect = asString(req.query.redirect_uri);
-      if (!validRedirect(redirect) || !client.redirect_uris.includes(redirect)) throw new OAuthError('invalid_request', 'The redirect URI does not exactly match the client registration.');
+      if (!client.redirect_uris.some(uri => matchesRedirect(uri, redirect))) throw new OAuthError('invalid_request', 'The redirect URI does not match the client registration. Only an IP loopback port may vary.');
       if (req.query.response_type !== 'code' || req.query.code_challenge_method !== 'S256' || !opaque.safeParse(req.query.code_challenge).success) throw new OAuthError('invalid_request', 'Authorization code flow with PKCE S256 is required.');
       if (req.query.resource !== config.resource) throw new OAuthError('invalid_target', 'Use the Edworking MCP resource URL.');
       if (req.query.state !== undefined && (typeof req.query.state !== 'string' || req.query.state.length > 2048)) throw new OAuthError('invalid_request', 'Invalid state.');
