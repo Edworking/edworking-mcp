@@ -1,8 +1,17 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.Edworking/bellsprout",
+  "name": "io.github.Edworking/edworking-mcp",
   "description": "Edworking projects, tasks, conversations and files with scoped OAuth access.",
-  "repository": { "url": "https://github.com/Edworking/bellsprout", "source": "github" },
-  "version": "0.1.0",
-  "remotes": [{ "type": "streamable-http", "url": "https://bellsprout-production.up.railway.app/mcp" }]
+  "repository": {
+    "url": "https://github.com/Edworking/edworking-mcp",
+    "source": "github"
+  },
+  "version": "0.1.1",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.edworking.com/mcp"
+    }
+  ],
+  "title": "Edworking MCP"
 }

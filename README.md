@@ -1,25 +1,27 @@
-# Bellsprout
+# Edworking MCP
 
 The official, open-source [Edworking](https://edworking.com) MCP server. Connect your assistant to projects, tasks, conversations and files your account can access.
 
-**Hosted endpoint:** `https://bellsprout-production.up.railway.app/mcp`
+**Hosted endpoint:** `https://mcp.edworking.com/mcp`
+
+**Domain activation:** `mcp.edworking.com` is the intended public origin. Until DNS/TLS activation is complete, use the endpoint displayed on [the running service](https://bellsprout-production.up.railway.app/). Do not submit directory manifests until the custom domain is verified.
 
 **Status:** initial release. Deployment does not imply OpenAI or directory approval. See [publication checklist](docs/distribution.md).
 
 ## Connect
 
-Add the endpoint to an MCP client supporting Streamable HTTP and OAuth. Follow the browser authorization window. Create a dedicated scoped token in **Edworking → Profile → API tokens**, enter it on the Bellsprout consent page and approve the client and permissions. Never paste a token into an assistant conversation.
+Add the endpoint to an MCP client supporting Streamable HTTP and OAuth. Follow the browser authorization window. Create a dedicated scoped token in **Edworking → Profile → API tokens**, enter it on the Edworking MCP consent page and approve the client and permissions. Never paste a token into an assistant conversation.
 
 Connections request read permissions by default. Writes require the matching OAuth scope and upstream token permission. Reconnect with explicit scopes if your client cannot request additional permissions. Revoke the dedicated token in Edworking to disconnect every grant using it. Grants expire within 30 days or when the Edworking token expires, whichever is sooner. Access tokens last up to ten minutes and refresh tokens rotate.
 
 ```sh
-codex mcp add bellsprout --url https://bellsprout-production.up.railway.app/mcp
-codex mcp login bellsprout
+codex mcp add edworking-mcp --url https://mcp.edworking.com/mcp
+codex mcp login edworking-mcp
 ```
 
 For ChatGPT testing, use **Plugins → Add custom MCP server**, select OAuth and enter the endpoint. Availability depends on your plan and workspace policy. A portable OpenAI plugin package is in [`plugin/`](plugin).
 
-Other clients should configure a remote HTTP server named `bellsprout` and use their built-in OAuth flow. Public clients with PKCE, dynamic registration and HTTPS Client ID Metadata Documents are supported. `/mcp` accepts only Bellsprout access tokens.
+Other clients should configure a remote HTTP server named `edworking-mcp` and use their built-in OAuth flow. Public clients with PKCE, dynamic registration and HTTPS Client ID Metadata Documents are supported. `/mcp` accepts only Edworking MCP access tokens.
 
 ## Tools
 
@@ -56,7 +58,7 @@ node --env-file=.env dist/index.js
 
 Run `npm run check` for type checking, security/integration tests and build. `npm run dev` starts a watcher when variables are already loaded by your shell.
 
-For local stdio, build and configure your client to run `node /absolute/path/to/bellsprout/dist/stdio.js` with `EDWORKING_API_TOKEN` supplied securely in its process environment. Stdio uses that token directly with Edworking and has in-memory deduplication that resets on restart. The npm package name in this manifest is not a claim that the package has been published.
+For local stdio, build and configure your client to run `node /absolute/path/to/edworking-mcp/dist/stdio.js` with `EDWORKING_API_TOKEN` supplied securely in its process environment. Stdio uses that token directly with Edworking and has in-memory deduplication that resets on restart. The npm package name in this manifest is not a claim that the package has been published.
 
 ## Railway deployment
 
