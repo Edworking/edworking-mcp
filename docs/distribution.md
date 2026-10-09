@@ -29,9 +29,9 @@ Sources: [package format](https://developers.openai.com/plugins/build/plugins), 
 | --- | --- | --- |
 | Official MCP Registry | `server.json`, source, remote URL | Follow https://modelcontextprotocol.io/registry/quickstart; authenticate ownership of `io.github.Edworking`, then run `mcp-publisher publish`. Remote-only servers do not need an npm release. |
 | Smithery | Remote URL and public server card | Submit `https://mcp.edworking.com/mcp` at https://smithery.ai/new and complete OAuth/ownership checks; https://smithery.ai/docs/build/publish |
-| Glama | `glama.json`, README and license | Add the repository at https://glama.ai/mcp/servers; https://glama.ai/mcp/faq |
+| Glama | `glama.json`, README and license | Add the repository at https://glama.ai/mcp/servers and the hosted service at https://glama.ai/mcp/connectors; complete ownership checks |
 | PulseMCP | Source, endpoint and description | Submit at https://www.pulsemcp.com/submit |
-| Awesome Remote MCP Servers | OAuth endpoint and source | Follow https://github.com/punkpeye/awesome-remote-mcp-servers contribution rules after real-client testing |
+| Awesome Remote MCP Servers | OAuth endpoint and source | First obtain a Glama connector listing and badge. Then propose a README PR at https://github.com/punkpeye/awesome-remote-mcp-servers, following its contribution rules and live handshake checks |
 | Awesome MCP Servers | Public source and setup guide | Propose a listing PR at https://github.com/punkpeye/awesome-mcp-servers following its contribution rules |
 | npm | Package and stdio entry point | Authenticate an authorized npm publisher, inspect `npm pack`, then publish |
 
