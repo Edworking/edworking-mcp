@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "edworking-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Connect Edworking projects, tasks, conversations and files to your assistant.",
   "author": { "name": "Edworking", "url": "https://edworking.com" },
   "homepage": "https://mcp.edworking.com",
@@ -22,7 +22,7 @@
         "privacyPolicyURL": "https://mcp.edworking.com/privacy",
         "termsOfServiceURL": "https://mcp.edworking.com/terms",
         "defaultPrompt": ["List my Edworking projects.", "Show the tasks in my launch project.", "Create a task to review the proposal, due Friday."],
-        "brandColor": "#21643B",
+        "brandColor": "#1a1a1a",
         "composerIcon": "./assets/icon.svg",
         "logo": "./assets/icon.svg"
       },
