@@ -1,9 +1,9 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
   "mcpServers": {
-    "bellsprout": {
+    "edworking-mcp": {
       "type": "streamable-http",
-      "url": "https://bellsprout-production.up.railway.app/mcp"
+      "url": "https://mcp.edworking.com/mcp"
     }
   }
 }
