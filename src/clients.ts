@@ -1,5 +1,7 @@
 import { lookup } from 'node:dns/promises';
 import { request } from 'node:https';
+import type { LookupAddress } from 'node:dns';
+import type { LookupFunction } from 'node:net';
 import ipaddr from 'ipaddr.js';
 import { z } from 'zod';
 import { Store } from './store.js';
@@ -32,6 +34,14 @@ const metadata = z.object({
 });
 export type Client = z.infer<typeof metadata> & { client_id: string };
 
+/** Return only the address already checked above, including Node's all-address lookup mode. */
+export function pinnedLookup(target: LookupAddress): LookupFunction {
+  return (_host, options, callback) => {
+    if (options.all) callback(null, [{ ...target }]);
+    else callback(null, target.address, target.family);
+  };
+}
+
 /** CIMD retrieval: HTTPS, public IPs, pinned DNS, no redirects, bounded body. */
 export async function fetchClientDocument(id: string): Promise<unknown> {
   const url = new URL(id);
@@ -41,7 +51,7 @@ export async function fetchClientDocument(id: string): Promise<unknown> {
   const target = addresses[0]!;
   return await new Promise((resolve, reject) => {
     const req = request(url, { method: 'GET', headers: { Accept: 'application/json' },
-      lookup: (_host, _opts, callback) => callback(null, target.address, target.family) }, res => {
+      lookup: pinnedLookup(target) }, res => {
       if (res.statusCode !== 200 || !res.headers['content-type']?.toLowerCase().includes('json')) { res.resume(); reject(new Error('Invalid client document')); return; }
       let bytes = 0; const chunks: Buffer[] = [];
       res.on('data', (chunk: Buffer) => { bytes += chunk.length; if (bytes > 65536) req.destroy(new Error('Document too large')); else chunks.push(chunk); });
@@ -65,8 +75,16 @@ export class Clients {
     const stored = this.store.get<Client>('client', hash(id));
     if (stored) return stored;
     if (!id.startsWith('https://')) return undefined;
-    const doc = z.object({ client_id: z.literal(id) }).passthrough().parse(await this.retrieve(id));
-    const client = { ...metadata.parse(doc), client_id: id };
+    const doc = metadata.extend({
+      client_id: z.literal(id),
+      token_endpoint_auth_method: z.string().min(1).max(100).optional(),
+      token_endpoint_auth_methods_supported: z.array(z.string().min(1).max(100)).min(1).max(10).optional(),
+    }).parse(await this.retrieve(id));
+    // CIMD's plural field is a capability set; the legacy singular field is a
+    // preference. Select only a method this PKCE-only authorization server supports.
+    const methods = doc.token_endpoint_auth_methods_supported ?? [doc.token_endpoint_auth_method ?? 'none'];
+    if (!methods.includes('none')) throw new Error('Client does not support public-client PKCE authentication');
+    const client = { ...metadata.parse({ ...doc, token_endpoint_auth_method: 'none' }), client_id: id };
     this.store.set('client', hash(id), client, Date.now() + 3600_000);
     return client;
   }
