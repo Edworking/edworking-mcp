@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createConnection, createServer } from 'node:net';
 import request from 'supertest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -11,7 +12,7 @@ import { readConfig, SCOPES } from '../src/config.js';
 import { Edworking, ApiError } from '../src/edworking.js';
 import { Store } from '../src/store.js';
 import { Vault, random, challenge } from '../src/crypto.js';
-import { Clients, fetchClientDocument, validRedirect, matchesRedirect } from '../src/clients.js';
+import { Clients, fetchClientDocument, validRedirect, matchesRedirect, pinnedLookup } from '../src/clients.js';
 import { executeTool, toolSpecs } from '../src/tools.js';
 
 const pat = `edw_pat_${'x'.repeat(43)}`;
@@ -192,6 +193,41 @@ test('AES-GCM detects tampering and upstream errors never include private respon
   assert.throws(() => new Vault('b'.repeat(64)).open(sealed));
   const fake = (async () => new Response(JSON.stringify({ errors: [{ message: 'SECRET-DATABASE-DETAIL', extensions: { code: 'FORBIDDEN' } }] }))) as typeof fetch;
   await assert.rejects(new Edworking('https://unused.example', fake).execute(pat, 'query { x }'), e => e instanceof ApiError && e.code === 'UNAUTHORIZED' && !e.message.includes('SECRET'));
+});
+
+test('CIMD negotiates the public PKCE method without accepting unsupported client authentication', async t => {
+  const id = 'https://client.example/oauth/client.json';
+  const doc = { client_id: id, client_name: 'ChatGPT-compatible client', redirect_uris: ['https://client.example/callback'], token_endpoint_auth_method: 'private_key_jwt', token_endpoint_auth_methods_supported: ['none', 'private_key_jwt'] };
+  for (const [overrides, accepted] of [
+    [{}, true],
+    [{ token_endpoint_auth_methods_supported: ['private_key_jwt', 'none'] }, true],
+    [{ token_endpoint_auth_method: 'none', token_endpoint_auth_methods_supported: undefined }, true],
+    [{ token_endpoint_auth_methods_supported: undefined }, false],
+    [{ token_endpoint_auth_method: 'none', token_endpoint_auth_methods_supported: ['private_key_jwt'] }, false],
+    [{ token_endpoint_auth_methods_supported: [] }, false],
+    [{ token_endpoint_auth_methods_supported: 'none' }, false],
+    [{ client_id: 'https://wrong.example/client.json' }, false],
+  ] as const) {
+    const store = new Store(':memory:'); t.after(() => store.close());
+    const clients = new Clients(store, async () => ({ ...doc, ...overrides }));
+    if (accepted) assert.equal((await clients.get(id))?.token_endpoint_auth_method, 'none');
+    else await assert.rejects(clients.get(id));
+    assert.throws(() => clients.register(doc), 'DCR must still reject a requested unsupported authentication method');
+  }
+});
+
+test('pinned DNS supports Node automatic address-family selection without a second DNS lookup', async t => {
+  const server = createServer(socket => socket.end());
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+  const address = server.address(); assert.ok(address && typeof address !== 'string');
+  for (const autoSelectFamily of [true, false]) {
+    const socket = createConnection({ host: 'must-not-resolve.invalid', port: address.port, autoSelectFamily, lookup: pinnedLookup({ address: '127.0.0.1', family: 4 }) });
+    t.after(() => socket.destroy());
+    await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject); });
+    assert.equal(socket.remoteAddress, '127.0.0.1');
+    socket.destroy();
+  }
 });
 
 
