@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.4 — 2026-10-10
+
+- Fix pinned HTTPS client-metadata retrieval with Node's automatic address-family selection.
+- Accept CIMD clients that explicitly support public PKCE authentication, including ChatGPT's multiple-method metadata. Continue rejecting unsupported methods and mismatched client identities.
+- Add regression coverage for both Node lookup modes and CIMD method negotiation. Exact redirects, PKCE, public-address validation and dynamic-registration restrictions remain enforced.
+
 ## 0.1.3 — 2026-10-09
 
 - Use `https://gateway.edworking.com/` as the default and production Edworking API endpoint.
