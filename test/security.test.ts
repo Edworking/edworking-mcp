@@ -36,6 +36,16 @@ function fixture(path = ':memory:') {
   const store = new Store(path), api = new FakeApi();
   return { ...createApp(config, store, api), config, store, api };
 }
+function callbackFromPage(response: { text: string; headers: Record<string, string> }) {
+  assert.equal(response.headers.location, undefined);
+  assert.match(response.headers['cache-control']!, /no-store/);
+  assert.match(response.headers['content-type']!, /text\/html/);
+  assert.match(response.headers['content-security-policy']!, /(?:^|;)form-action 'self'(?:;|$)/);
+  const href = response.text.match(/<a class="button" href="([^"]+)" rel="noreferrer">Return to your assistant<\/a>/)![1]!;
+  assert.ok(response.text.includes(`<meta http-equiv="refresh" content="0;url=${href}">`));
+  assert.ok(!response.text.includes('<script'));
+  return new URL(href.replaceAll('&amp;', '&').replaceAll('&quot;', '"').replaceAll('&#39;', "'").replaceAll('&lt;', '<').replaceAll('&gt;', '>'));
+}
 async function begin(f: ReturnType<typeof fixture>, scope = 'projects:read tasks:read tasks:write') {
   const client = (await request(f.app).post('/oauth/register').send({ client_name: '<script>client</script>', redirect_uris: ['https://client.example/callback'], token_endpoint_auth_method: 'none' }).expect(201)).body;
   const browser = request.agent(f.app), verifier = random();
@@ -48,7 +58,7 @@ async function begin(f: ReturnType<typeof fixture>, scope = 'projects:read tasks
   assert.equal(page.headers['referrer-policy'], 'same-origin');
   assert.match(page.text, /name="referrer" content="same-origin"/);
   const policy = page.headers['content-security-policy'];
-  assert.match(policy, /(?:^|;)form-action 'self' https:\/\/client\.example(?:;|$)/);
+  assert.match(policy, /(?:^|;)form-action 'self'(?:;|$)/);
   assert.match(policy, /(?:^|;)default-src 'none'(?:;|$)/);
   const csrf = page.text.match(/name="csrf" value="([^"]+)"/)![1];
   return { client, browser, verifier, params, id, csrf };
@@ -58,8 +68,8 @@ async function authorize(f: ReturnType<typeof fixture>, scope?: string) {
   await b.browser.post('/oauth/link-token').set('Origin', f.config.origin).type('form').send({ request: b.id, csrf: b.csrf, api_token: pat }).expect(303);
   const consent = await b.browser.get(`/oauth/consent?request=${b.id}`).expect(200);
   assert.ok(consent.text.includes('Review access')); assert.ok(!consent.text.includes(pat));
-  const approved = await b.browser.post('/oauth/approve').set('Origin', f.config.origin).type('form').send({ request: b.id, csrf: b.csrf, decision: 'approve' }).expect(303);
-  const url = new URL(approved.headers.location);
+  const approved = await b.browser.post('/oauth/approve').set('Origin', f.config.origin).type('form').send({ request: b.id, csrf: b.csrf, decision: 'approve' }).expect(200);
+  const url = callbackFromPage(approved);
   assert.equal(url.searchParams.get('state'), 'client-state'); assert.equal(url.searchParams.get('iss'), f.config.origin);
   const body = { grant_type: 'authorization_code', client_id: b.client.client_id, resource: f.config.resource, redirect_uri: b.params.redirect_uri, code: url.searchParams.get('code'), code_verifier: b.verifier };
   return { ...b, body };
@@ -88,8 +98,8 @@ test('native OAuth permits only an IP loopback port change and binds the code to
   const id = new URL(started.headers.location, f.config.origin).searchParams.get('request');
   const consent = await browser.get(started.headers.location).expect(200), csrf = consent.text.match(/name="csrf" value="([^"]+)"/)![1];
   await browser.post('/oauth/link-token').set('Origin', f.config.origin).type('form').send({ request: id, csrf, api_token: pat }).expect(303);
-  const approved = await browser.post('/oauth/approve').set('Origin', f.config.origin).type('form').send({ request: id, csrf, decision: 'approve' }).expect(303);
-  const callback = new URL(approved.headers.location); assert.equal(callback.port, '49152');
+  const approved = await browser.post('/oauth/approve').set('Origin', f.config.origin).type('form').send({ request: id, csrf, decision: 'approve' }).expect(200);
+  const callback = callbackFromPage(approved); assert.equal(callback.port, '49152');
   const exchange = { grant_type: 'authorization_code', client_id: client.client_id, code: callback.searchParams.get('code'), code_verifier: verifier, resource: f.config.resource };
   await request(f.app).post('/oauth/token').type('form').send({ ...exchange, redirect_uri: 'http://127.0.0.1:49153/callback' }).expect(400);
   await request(f.app).post('/oauth/token').type('form').send({ ...exchange, redirect_uri: redirect }).expect(200);
@@ -108,6 +118,28 @@ test('authorization codes and refresh tokens are single-use; replay revokes the 
   assert.notEqual(next.refresh_token, tokens.refresh_token);
   await request(f.app).post('/oauth/token').type('form').send(refresh).expect(400);
   assert.throws(() => f.oauth.authenticate(next.access_token));
+});
+
+test('consent handoff safely escapes state, keeps the registered callback and cannot mint twice', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  const b = await begin(f);
+  const state = '"/><script>alert(1)</script>&next=https://evil.example';
+  const started = await b.browser.get('/oauth/authorize').query({ ...b.params, state }).expect(303);
+  const id = new URL(started.headers.location, f.config.origin).searchParams.get('request')!;
+  const consent = await b.browser.get(started.headers.location).expect(200);
+  const csrf = consent.text.match(/name="csrf" value="([^"]+)"/)![1];
+  await b.browser.post('/oauth/link-token').set('Origin', f.config.origin).type('form').send({ request: id, csrf, api_token: pat }).expect(303);
+  const form = { request: id, csrf, decision: 'approve', redirect_uri: 'https://evil.example/callback' };
+  await b.browser.post('/oauth/approve').set('Origin', f.config.origin).type('form').send({ ...form, csrf: 'wrong' }).expect(400);
+  const approved = await b.browser.post('/oauth/approve').set('Origin', f.config.origin).type('form').send(form).expect(200);
+  const callback = callbackFromPage(approved);
+  assert.equal(callback.origin + callback.pathname, b.params.redirect_uri);
+  assert.equal(callback.searchParams.get('state'), state);
+  assert.equal(callback.searchParams.get('iss'), f.config.origin);
+  assert.ok(!approved.text.includes(pat));
+  const repeated = await b.browser.post('/oauth/approve').set('Origin', f.config.origin).type('form').send(form).expect(400);
+  assert.equal(repeated.body.error, 'invalid_grant');
+  await request(f.app).post('/oauth/token').type('form').send({ grant_type: 'authorization_code', client_id: b.client.client_id, resource: f.config.resource, redirect_uri: b.params.redirect_uri, code: callback.searchParams.get('code'), code_verifier: b.verifier }).expect(200);
 });
 test('code replay, explicit revocation and upstream revocation block access', async t => {
   const f = fixture(); t.after(() => f.store.close());
@@ -133,8 +165,8 @@ test('unconfigured native handoff is unavailable and OAuth cancellation preserve
   await request(f.app).get('/oauth/request').expect(404);
   await request(f.app).post('/oauth/link').send({}).expect(404);
   const b = await begin(f);
-  const denied = await b.browser.post('/oauth/approve').set('Origin', f.config.origin).type('form').send({ request: b.id, csrf: b.csrf, decision: 'deny' }).expect(303);
-  const callback = new URL(denied.headers.location);
+  const denied = await b.browser.post('/oauth/approve').set('Origin', f.config.origin).type('form').send({ request: b.id, csrf: b.csrf, decision: 'deny' }).expect(200);
+  const callback = callbackFromPage(denied);
   assert.equal(callback.origin, 'https://client.example');
   assert.equal(callback.searchParams.get('error'), 'access_denied');
   assert.equal(callback.searchParams.get('state'), 'client-state');

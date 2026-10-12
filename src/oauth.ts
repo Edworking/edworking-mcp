@@ -7,7 +7,7 @@ import { Store } from './store.js';
 import { Clients, matchesRedirect } from './clients.js';
 import { Edworking, ApiError, type TokenInfo } from './edworking.js';
 import { Vault, hash, random, equal, challenge } from './crypto.js';
-import { consent, page } from './pages.js';
+import { consent, page, escape } from './pages.js';
 
 export class OAuthError extends Error {
   constructor(public code: string, message: string, public status = 400) { super(message); }
@@ -39,7 +39,7 @@ export class OAuth {
   }
   private pending(id: string): Pending {
     const pending = this.store.get<Pending>('pending', id);
-    if (!pending) throw deny('This connection request has expired. Start again from your assistant.');
+    if (!pending) throw deny('This connection request has expired or has already been used. Start again from your assistant.');
     return pending;
   }
   private browser(req: Request, pending: Pending, csrf = false) {
@@ -50,11 +50,16 @@ export class OAuth {
     return consent(this.config, { ...p, name: p.info?.name, expiresAt: p.info?.expiresAt }, error);
   }
   private sendView(res: Response, p: Pending, error?: string) {
-    // Browsers can apply form-action to the POST's redirect as well. Permit
-    // only this registered client's origin while retaining the other CSP rules.
-    const policy = String(res.getHeader('Content-Security-Policy') || '');
-    res.set('Content-Security-Policy', policy.replace(/form-action[^;]*/, `form-action 'self' ${new URL(p.redirect).origin}`));
     res.type('html').send(this.view(p, error));
+  }
+  private returnToClient(res: Response, url: URL) {
+    // End the form submission with a document. A 303 keeps the client's later
+    // redirects subject to our form-action policy (e.g. ChatGPT -> Platform).
+    // Only the callback validated at /authorize reaches this helper. A normal
+    // navigation also lets clients relay to their own UI without allowing our
+    // credential forms to post to those additional origins.
+    res.clearCookie(this.cookie, { path: '/', httpOnly: true, secure: this.config.production, sameSite: 'lax' });
+    res.type('html').send(page('Return to your assistant', `<h1>Returning to your assistant</h1><p>Your choice has been saved. If this page does not continue automatically, use the button below.</p><p><a class="button" href="${escape(url.href)}" rel="noreferrer">Return to your assistant</a></p><p><small>If your assistant reports an expired connection, start a new connection there.</small></p>`, `<meta http-equiv="refresh" content="0;url=${escape(url.href)}">`));
   }
   private async link(p: Pending, token: string) {
     const info = await this.api.tokenInfo(token);
@@ -143,7 +148,7 @@ export class OAuth {
     r.post('/oauth/approve', budget(20), (req, res) => {
       const p = this.pending(asString(req.body.request)); this.browser(req, p, true);
       const url = new URL(p.redirect); url.searchParams.set('iss', config.origin); if (p.state !== undefined) url.searchParams.set('state', p.state);
-      if (req.body.decision === 'deny') { this.store.remove('pending', p.id); url.searchParams.set('error', 'access_denied'); res.redirect(303, url.href); return; }
+      if (req.body.decision === 'deny') { this.store.remove('pending', p.id); url.searchParams.set('error', 'access_denied'); this.returnToClient(res, url); return; }
       if (req.body.decision !== 'approve' || !p.upstream || !p.info) throw deny('Connect your Edworking workspace first.');
       const grant: Grant = { id: random(), clientId: p.clientId, scopes: p.scopes, resource: config.resource, upstream: p.upstream, info: p.info, expires: Math.min(Date.parse(p.info.expiresAt), Date.now() + 30 * 86400_000) };
       const code = random();
@@ -152,8 +157,7 @@ export class OAuth {
         this.store.set('grant', grant.id, grant, grant.expires);
         this.store.set('code', hash(code), { grantId: grant.id, clientId: p.clientId, resource: config.resource, scopes: p.scopes, challenge: p.challenge, redirect: p.redirect, expires: Date.now() + 60_000 }, Date.now() + 600_000);
       });
-      res.clearCookie(this.cookie, { path: '/', httpOnly: true, secure: config.production, sameSite: 'lax' });
-      url.searchParams.set('code', code); res.redirect(303, url.href);
+      url.searchParams.set('code', code); this.returnToClient(res, url);
     });
     r.post('/oauth/token', budget(60), async (req, res) => {
       const clientId = asString(req.body.client_id), resource = asString(req.body.resource);

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Browser consent now completes with an automatic return page and a fallback link. This avoids carrying the consent form's Content Security Policy into an assistant's callback redirect chain.
+- Consent forms keep `form-action 'self'`. Registered callback validation, CSRF, PKCE, state/issuer responses and single-use authorization codes remain enforced.
+- The used-request error now distinguishes an expired or already consumed request; restart the connection from the assistant to recover.
+
 ## 0.1.4 — 2026-10-10
 
 - Fix pinned HTTPS client-metadata retrieval with Node's automatic address-family selection.

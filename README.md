@@ -25,6 +25,8 @@ Other clients should configure a remote HTTP server named `edworking-mcp` and us
 
 Client setup instructions: [Edworking MCP guide](https://edworking.com/integrations/mcp). See the [competitor review and delivery roadmap](docs/competitive-roadmap.md) for remaining capabilities and launch gates.
 
+After **Allow access** or **Cancel**, the browser returns to your assistant automatically. If it remains on **Returning to your assistant**, use the return button. Each consent request can be used once and expires after ten minutes. If you see `invalid_grant` or an expired/used request, start a new connection from your assistant instead of reopening the old consent link. Do not refresh or resubmit the approval form.
+
 ## Tools
 
 | Tool | Scope | Purpose |
