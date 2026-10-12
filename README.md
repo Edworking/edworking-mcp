@@ -64,7 +64,7 @@ node --env-file=.env dist/index.js
 
 Run `npm run check` for type checking, security/integration tests and build. `npm run dev` starts a watcher when variables are already loaded by your shell.
 
-For local stdio, build and configure your client to run `node /absolute/path/to/edworking-mcp/dist/stdio.js` with `EDWORKING_API_TOKEN` supplied securely in its process environment. Stdio uses that token directly with Edworking and has in-memory deduplication that resets on restart. The npm package name in this manifest is not a claim that the package has been published.
+For local stdio, configure your client to run `npx -y @edworking/mcp@0.1.4` with `EDWORKING_API_TOKEN` supplied securely in its process environment, or build from source and run `node /absolute/path/to/edworking-mcp/dist/stdio.js`. The [npm package](https://www.npmjs.com/package/@edworking/mcp) is public. Stdio uses that token directly with Edworking and has in-memory deduplication that resets on restart.
 
 ## Railway deployment
 
