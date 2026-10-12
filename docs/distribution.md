@@ -1,10 +1,12 @@
 # Publication checklist
 
-Prepared 2026-10-09. A repository, deployment and directory approval are separate milestones. Never claim a listing without a verified listing URL.
+Updated 2026-10-12. A repository, deployment and directory approval are separate milestones. Never claim a listing without a verified listing URL.
 
 ## OpenAI
 
 ZIP the contents of `plugin/` at the archive root and upload to https://platform.openai.com/plugins. It includes one remote MCP server in the initial package.
+
+Current status: the 0.1.4 draft is authorized, the domain is verified, and the latest authenticated metadata scan discovers all 15 tools with no findings. It is **not submitted or published**. The five positive and three negative scenarios still need recorded execution with suitable demo permissions, an MCP-specific walkthrough URL, and final review attestations. A metadata scan is not an independent security audit.
 
 Before submission:
 
@@ -25,18 +27,18 @@ Sources: [package format](https://developers.openai.com/plugins/build/plugins), 
 
 ## Community
 
-| Destination | Prepared | Remaining action |
+| Destination | Verified status | Remaining action |
 | --- | --- | --- |
-| Official MCP Registry | `server.json`, source, remote URL | Follow https://modelcontextprotocol.io/registry/quickstart; authenticate ownership of `io.github.Edworking`, then run `mcp-publisher publish`. Remote-only servers do not need an npm release. |
-| Smithery | Remote URL and public server card | Submit `https://mcp.edworking.com/mcp` at https://smithery.ai/new and complete OAuth/ownership checks; https://smithery.ai/docs/build/publish |
-| Glama | `glama.json`, README and license | Add the repository at https://glama.ai/mcp/servers and the hosted service at https://glama.ai/mcp/connectors; complete ownership checks |
-| PulseMCP | Source, endpoint and description | Submit at https://www.pulsemcp.com/submit |
-| Awesome Remote MCP Servers | OAuth endpoint and source | First obtain a Glama connector listing and badge. Then propose a README PR at https://github.com/punkpeye/awesome-remote-mcp-servers, following its contribution rules and live handshake checks |
-| Awesome MCP Servers | Public source and setup guide | Propose a listing PR at https://github.com/punkpeye/awesome-mcp-servers following its contribution rules |
-| npm | Package and stdio entry point | Authenticate an authorized npm publisher, inspect `npm pack`, then publish |
+| Official MCP Registry | **Active**, `io.github.Edworking/edworking-mcp` 0.1.4; [public registry response](https://registry.modelcontextprotocol.io/v0.1/servers?search=edworking) | Future versions use the manual `Publish MCP Registry` GitHub Actions workflow on `main`. It validates `server.json` and uses short-lived GitHub OIDC; no registry secret is stored. [Successful publication](https://github.com/Edworking/edworking-mcp/actions/runs/38263590399). |
+| Smithery | [Published](https://smithery.ai/servers/david-cagigas/edworking-mcp), 15 tools, **98/100**; DNS ownership and README backlink confirmed | Optional verified badge additionally requires a paid Developer plan. OAuth remains required for workspace access. |
+| Glama | Source repository and hosted endpoint forms both explicitly confirm **pending review** | Await approval at https://glama.ai/mcp/servers and https://glama.ai/mcp/connectors; avoid duplicate submissions. |
+| PulseMCP | Submissions and listing changes paused; notice dated 2026-09-03 | Its [submission page](https://www.pulsemcp.com/submit) directs publishers to the Official MCP Registry for later discovery. Registry publication is complete; PulseMCP listing is not confirmed. |
+| Awesome Remote MCP Servers | Not submitted | First obtain a Glama connector listing and badge. Then propose a README PR at https://github.com/punkpeye/awesome-remote-mcp-servers, following its contribution rules and live handshake checks. |
+| Awesome MCP Servers | [PR #16055](https://github.com/punkpeye/awesome-mcp-servers/pull/16055) open and unmerged, labeled `missing-glama` | Add the approved Glama listing and passing introspection badge when available. |
+| npm | [@edworking/mcp 0.1.4](https://www.npmjs.com/package/@edworking/mcp) is public | Publishing requires 2FA; bypass-2FA tokens are disallowed. Inspect the package and authenticate each future release. |
 
 Listing copy: **Edworking MCP connects AI assistants to your projects, tasks, conversations and files. Read workspace context and take requested actions with scoped OAuth access and links back to Edworking.**
 
-Repository: https://github.com/Edworking/edworking-mcp. Website: https://mcp.edworking.com. Endpoint: https://mcp.edworking.com/mcp. Public name: **Edworking MCP**. Infrastructure codename: **Bellsprout**. Metadata is prepared; directory publication has not been completed.
+Repository: https://github.com/Edworking/edworking-mcp. Website: https://mcp.edworking.com. Endpoint: https://mcp.edworking.com/mcp. Public name: **Edworking MCP**. Infrastructure codename: **Bellsprout**. Only the destinations explicitly marked published above are live listings.
 
 Recommended next work: native consent/workspace selection, real-client evaluation fixtures, uptime alerts, tested backups and independent OAuth review. Expand Venusaur's scoped search/document APIs before adding corresponding tools. Optional MCP Apps task cards can follow; core tools do not require UI widgets. Move to Postgres only when multiple replicas are needed.
