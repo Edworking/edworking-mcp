@@ -1,5 +1,7 @@
 # Edworking MCP
 
+[![Edworking MCP on Smithery](https://smithery.ai/badge/david-cagigas/edworking-mcp)](https://smithery.ai/servers/david-cagigas/edworking-mcp)
+
 The official, open-source [Edworking](https://edworking.com) MCP server. Connect your assistant to projects, tasks, conversations and files your account can access.
 
 **Hosted endpoint:** `https://mcp.edworking.com/mcp`

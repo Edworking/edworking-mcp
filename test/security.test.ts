@@ -299,6 +299,14 @@ test('all 15 tools run through the MCP SDK, reject missing scopes and deduplicat
   };
   const catalog = await client.listTools();
   assert.deepEqual(catalog.tools.map(x => x.name).sort(), Object.keys(cases).sort());
+  const publicCard = (await request(f.app).get('/.well-known/mcp/server-card.json').expect(200)).body;
+  for (const tool of catalog.tools) {
+    assert.equal(tool.outputSchema?.type, 'object', tool.name + ' output contract');
+    for (const field of Object.values(tool.inputSchema.properties ?? {})) {
+      assert.equal(typeof (field as { description?: unknown }).description, 'string', tool.name + ' parameter guidance');
+    }
+    assert.deepEqual(publicCard.tools.find((x: { name: string }) => x.name === tool.name).outputSchema.properties, tool.outputSchema.properties, tool.name + ' public metadata parity');
+  }
   for (const [name, args] of Object.entries(cases)) {
     const before = f.api.calls.length, result = await client.callTool({ name, arguments: args });
     assert.notEqual(result.isError, true, name);
