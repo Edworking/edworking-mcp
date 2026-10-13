@@ -1,6 +1,7 @@
 # Edworking MCP
 
 [![Edworking MCP on Smithery](https://smithery.ai/badge/david-cagigas/edworking-mcp)](https://smithery.ai/servers/david-cagigas/edworking-mcp)
+[![Edworking MCP on Glama](https://glama.ai/mcp/connectors/io.github.Edworking/edworking-mcp/badges/score.svg)](https://glama.ai/mcp/connectors/io.github.Edworking/edworking-mcp)
 
 The official, open-source [Edworking](https://edworking.com) MCP server. Connect your assistant to projects, tasks, conversations and files your account can access.
 
@@ -21,7 +22,7 @@ codex mcp add edworking-mcp --url https://mcp.edworking.com/mcp
 codex mcp login edworking-mcp
 ```
 
-For ChatGPT testing, use **Plugins → Add custom MCP server**, select OAuth and enter the endpoint. Availability depends on your plan and workspace policy. A portable OpenAI plugin package is in [`plugin/`](plugin).
+For ChatGPT testing, use **Plugins → Add custom MCP server**, select OAuth and enter the endpoint. Availability depends on your plan and workspace policy. A portable OpenAI plugin package is in [`plugin/`](plugin). That package declares the five read and four write OAuth scopes needed for its advertised capabilities. Verify the actual consent screen and `get_connection` result: the submission portal still requested only read scopes during the 13 October check. Existing read-only grants remain read-only until reauthorized; a token with write permissions does not automatically upgrade an OAuth grant.
 
 Other clients should configure a remote HTTP server named `edworking-mcp` and use their built-in OAuth flow. Public clients with PKCE, dynamic registration and HTTPS Client ID Metadata Documents are supported. `/mcp` accepts only Edworking MCP access tokens.
 
