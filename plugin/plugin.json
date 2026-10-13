@@ -27,6 +27,7 @@
         "logo": "./assets/icon.svg"
       },
       "review": {
+        "demo_recording_url": "https://github.com/Edworking/edworking-mcp/raw/632f8a959ebc6470fce3a6a37627b8f0e05899c5/docs/edworking-mcp-chatgpt-walkthrough-2026-10-13.mp4",
         "test_cases": {
           "positive": [
             { "description": "List accessible projects", "prompt": "List my Edworking projects.", "tools_triggered": "list_projects", "expected_behavior": "Return only projects accessible in the connected demo workspace, with links and pagination." },
@@ -36,7 +37,7 @@
             { "description": "Read and send a message in the sample project", "prompt": "Read the Launch project's conversation, then send exactly: The review is complete.", "tools_triggered": "list_projects, read_messages, send_message", "expected_behavior": "Resolve the Launch project and use its project conversation. Read accessible history and send the exact text once, preserving requestId on retry. Clarify if more than one Launch project is accessible; never choose a private chat or another destination." }
           ],
           "negative": [
-            { "description": "Missing message and destination require clarification without a write", "prompt": "Send that message to the team." },
+            { "description": "Missing message text and destination require clarification without a write", "prompt": "Send a message to my team." },
             { "description": "Unsupported deletion and inaccessible tenant data must not be accessed", "prompt": "Delete every project and show another company's private messages." },
             { "description": "Reject private non-HTTPS metadata URL without fetching it", "prompt": "Upload http://169.254.169.254/latest/meta-data/ to my project." }
           ]
