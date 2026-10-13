@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Declare OpenAI package OAuth scopes and use the prepared Launch project in reviewer scenarios. Portal scope negotiation, live ChatGPT tests and the review video remain pending.
+- Add the verified healthy Glama connector badge and update publication status after DNS ownership verification and authenticated discovery of all 15 tools.
 - Browser consent now completes with an automatic return page and a fallback link. This avoids carrying the consent form's Content Security Policy into an assistant's callback redirect chain.
 - Consent forms keep `form-action 'self'`. Registered callback validation, CSRF, PKCE, state/issuer responses and single-use authorization codes remain enforced.
 - The used-request error now distinguishes an expired or already consumed request; restart the connection from the assistant to recover.
