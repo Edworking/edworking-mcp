@@ -9,7 +9,7 @@
           "auth": {
             "type": "oauth",
             "client": { "mode": "cimd" },
-            "defaultScopes": [
+            "baseScopes": [
               "projects:read",
               "tasks:read",
               "messages:read",
