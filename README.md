@@ -9,7 +9,7 @@ The official, open-source [Edworking](https://edworking.com) MCP server. Connect
 
 **Public identity:** Edworking MCP. The Railway infrastructure retains the codename **Bellsprout**. Use the custom domain above for all new connections. Connections created against the earlier Railway URL must reconnect because their OAuth resource audience has changed.
 
-**Status:** initial release. Deployment does not imply OpenAI or directory approval. See [publication checklist](docs/distribution.md).
+**Status:** 0.1.4 is available through npm, the Official MCP Registry, Smithery and the Glama hosted connector. OpenAI review was submitted on 13 October 2026 and is pending; it is not yet published in OpenAI. See the [publication checklist](docs/distribution.md) for individual directory statuses.
 
 ## Connect
 
@@ -22,7 +22,7 @@ codex mcp add edworking-mcp --url https://mcp.edworking.com/mcp
 codex mcp login edworking-mcp
 ```
 
-For ChatGPT testing, use **Plugins → Add custom MCP server**, select OAuth and enter the endpoint. Availability depends on your plan and workspace policy. A portable OpenAI plugin package is in [`plugin/`](plugin). That package declares the five read and four write OAuth scopes needed for its advertised capabilities. Verify the actual consent screen and `get_connection` result: the submission portal still requested only read scopes during the 13 October check. Existing read-only grants remain read-only until reauthorized; a token with write permissions does not automatically upgrade an OAuth grant.
+For ChatGPT testing, use **Plugins → Add custom MCP server**, select OAuth and enter the endpoint. Availability depends on your plan and workspace policy. A portable OpenAI plugin package is in [`plugin/`](plugin). That package declares the five read and four write OAuth scopes needed for its advertised capabilities. Verify the actual consent screen and `get_connection` result. On 13 October, the submission portal metadata grant used five read scopes, while a separate ChatGPT demo connection received all nine scopes and successfully created a task and sent a message. Existing read-only grants remain read-only until reauthorized; a token with write permissions does not automatically upgrade an OAuth grant.
 
 Other clients should configure a remote HTTP server named `edworking-mcp` and use their built-in OAuth flow. Public clients with PKCE, dynamic registration and HTTPS Client ID Metadata Documents are supported. `/mcp` accepts only Edworking MCP access tokens.
 
