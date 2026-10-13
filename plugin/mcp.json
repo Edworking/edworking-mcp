@@ -3,7 +3,26 @@
   "mcpServers": {
     "edworking-mcp": {
       "type": "streamable-http",
-      "url": "https://mcp.edworking.com/mcp"
+      "url": "https://mcp.edworking.com/mcp",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": { "mode": "cimd" },
+            "defaultScopes": [
+              "projects:read",
+              "tasks:read",
+              "messages:read",
+              "chats:read",
+              "files:read",
+              "projects:write",
+              "tasks:write",
+              "messages:write",
+              "files:write"
+            ]
+          }
+        }
+      }
     }
   }
 }
