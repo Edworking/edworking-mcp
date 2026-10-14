@@ -8,7 +8,9 @@
         "com.openai": {
           "auth": {
             "type": "oauth",
-            "client": { "mode": "cimd" },
+            "client": {
+              "mode": "cimd"
+            },
             "baseScopes": [
               "projects:read",
               "tasks:read",
@@ -18,7 +20,9 @@
               "projects:write",
               "tasks:write",
               "messages:write",
-              "files:write"
+              "files:write",
+              "docs:read",
+              "docs:write"
             ]
           }
         }

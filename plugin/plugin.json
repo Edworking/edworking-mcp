@@ -1,27 +1,43 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "edworking-mcp",
-  "version": "0.1.4",
-  "description": "Connect Edworking projects, tasks, conversations and files to your assistant.",
-  "author": { "name": "Edworking", "url": "https://edworking.com" },
+  "version": "0.2.0",
+  "description": "Connect Edworking tasks, Docs, projects, conversations and files to your assistant.",
+  "author": {
+    "name": "Edworking",
+    "url": "https://edworking.com"
+  },
   "homepage": "https://mcp.edworking.com",
   "repository": "https://github.com/Edworking/edworking-mcp",
   "license": "MIT",
-  "keywords": ["edworking", "tasks", "projects", "productivity", "mcp"],
+  "keywords": [
+    "edworking",
+    "tasks",
+    "projects",
+    "productivity",
+    "mcp"
+  ],
   "extensions": {
     "com.openai": {
       "interface": {
         "displayName": "Edworking MCP",
         "shortDescription": "Your Edworking assistant",
-        "longDescription": "Read accessible projects, tasks, conversations and file information. Create tasks and projects, edit task names and deadlines, send messages and import public files when requested and authorized. Search covers up to 500 recently updated task titles; document bodies, status changes and reassignment are not supported. Requires an Edworking account and browser authorization with a dedicated scoped token.",
+        "longDescription": "Read accessible workspace content and search indexed tasks, Docs, files and project messages. Create tasks and Docs; update task status, priority, assignees and dates; make targeted Markdown edits to task descriptions and Docs. Send requested messages and import public files with matching permissions. Search is ranked and bounded; indexing may lag. Requires an Edworking account and browser authorization with a dedicated scoped token.",
         "developerName": "Edworking",
         "category": "Productivity",
-        "capabilities": ["Read", "Write"],
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
         "websiteURL": "https://edworking.com",
         "supportURL": "https://github.com/Edworking/edworking-mcp/issues",
         "privacyPolicyURL": "https://mcp.edworking.com/privacy",
         "termsOfServiceURL": "https://mcp.edworking.com/terms",
-        "defaultPrompt": ["List my Edworking projects.", "Show the tasks in my launch project.", "Create a task to review the proposal, due Friday."],
+        "defaultPrompt": [
+          "List my Edworking projects.",
+          "Show the tasks in my launch project.",
+          "Create a task to review the proposal, due Friday."
+        ],
         "brandColor": "#1a1a1a",
         "composerIcon": "./assets/icon.svg",
         "logo": "./assets/icon.svg"
@@ -30,16 +46,50 @@
         "demo_recording_url": "https://github.com/Edworking/edworking-mcp/raw/632f8a959ebc6470fce3a6a37627b8f0e05899c5/docs/edworking-mcp-chatgpt-walkthrough-2026-10-13.mp4",
         "test_cases": {
           "positive": [
-            { "description": "List accessible projects", "prompt": "List my Edworking projects.", "tools_triggered": "list_projects", "expected_behavior": "Return only projects accessible in the connected demo workspace, with links and pagination." },
-            { "description": "Review project tasks", "prompt": "Show tasks in Launch with their deadlines.", "tools_triggered": "list_projects, list_tasks", "expected_behavior": "Resolve the project ID, then list its task names, deadlines, statuses and source links." },
-            { "description": "Search and open a sample task", "prompt": "Find tasks about onboarding, then open the task called Onboarding checklist — MCP review sample.", "tools_triggered": "search, fetch", "expected_behavior": "Find the sample task by title, fetch that result and return its source link. Explain that search covers up to 500 recently updated task titles, not document bodies or all workspace history." },
-            { "description": "Create one task", "prompt": "Create a task called Review the proposal in Launch, due 2026-11-06 at 17:00 UTC.", "tools_triggered": "list_projects, create_task", "expected_behavior": "Create one task with the requested fields. Preserve requestId across retries." },
-            { "description": "Read and send a message in the sample project", "prompt": "Read the Launch project's conversation, then send exactly: The review is complete.", "tools_triggered": "list_projects, read_messages, send_message", "expected_behavior": "Resolve the Launch project and use its project conversation. Read accessible history and send the exact text once, preserving requestId on retry. Clarify if more than one Launch project is accessible; never choose a private chat or another destination." }
+            {
+              "description": "List accessible projects",
+              "prompt": "List my Edworking projects.",
+              "tools_triggered": "list_projects",
+              "expected_behavior": "Return only projects accessible in the connected demo workspace, with links and pagination."
+            },
+            {
+              "description": "Review project tasks",
+              "prompt": "Show tasks in Launch with their deadlines.",
+              "tools_triggered": "list_projects, list_tasks",
+              "expected_behavior": "Resolve the project ID, then list its task names, deadlines, statuses and source links."
+            },
+            {
+              "description": "Search and open a sample task",
+              "prompt": "Find tasks about onboarding, then open the task called Onboarding checklist â€” MCP review sample.",
+              "tools_triggered": "search, fetch",
+              "expected_behavior": "Search permitted indexed sources, fetch the selected typed result ID and return its source link. Explain ranked result bounds, indexing lag, unavailable sources and excluded private chats/projectless items."
+            },
+            {
+              "description": "Create one task",
+              "prompt": "Create a task called Review the proposal in Launch, due 2026-11-06 at 17:00 UTC.",
+              "tools_triggered": "list_projects, create_task",
+              "expected_behavior": "Create one task with the requested fields. Preserve requestId across retries."
+            },
+            {
+              "description": "Read and send a message in the sample project",
+              "prompt": "Read the Launch project's conversation, then send exactly: The review is complete.",
+              "tools_triggered": "list_projects, read_messages, send_message",
+              "expected_behavior": "Resolve the Launch project and use its project conversation. Read accessible history and send the exact text once, preserving requestId on retry. Clarify if more than one Launch project is accessible; never choose a private chat or another destination."
+            }
           ],
           "negative": [
-            { "description": "Missing message text and destination require clarification without a write", "prompt": "Send a message to my team." },
-            { "description": "Unsupported deletion and inaccessible tenant data must not be accessed", "prompt": "Delete every project and show another company's private messages." },
-            { "description": "Reject private non-HTTPS metadata URL without fetching it", "prompt": "Upload http://169.254.169.254/latest/meta-data/ to my project." }
+            {
+              "description": "Missing message text and destination require clarification without a write",
+              "prompt": "Send a message to my team."
+            },
+            {
+              "description": "Unsupported deletion and inaccessible tenant data must not be accessed",
+              "prompt": "Delete every project and show another company's private messages."
+            },
+            {
+              "description": "Reject private non-HTTPS metadata URL without fetching it",
+              "prompt": "Upload http://169.254.169.254/latest/meta-data/ to my project."
+            }
           ]
         }
       }

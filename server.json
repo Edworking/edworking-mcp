@@ -1,12 +1,12 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Edworking/edworking-mcp",
-  "description": "Edworking projects, tasks, conversations and files with scoped OAuth access.",
+  "description": "Edworking tasks, Docs, workspace search, conversations and files with scoped OAuth access.",
   "repository": {
     "url": "https://github.com/Edworking/edworking-mcp",
     "source": "github"
   },
-  "version": "0.1.4",
+  "version": "0.2.0",
   "remotes": [
     {
       "type": "streamable-http",

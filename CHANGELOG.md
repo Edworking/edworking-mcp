@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0 — richer workspace tools
+
+- Expand the catalog from 15 to 22 tools: project members, Docs list/read/create/rename, and targeted task/Doc content edits.
+- Edit task status, priority, assignees, start date and deadline; filter tasks by these fields and title.
+- Search indexed tasks, Docs, files and project messages with per-source permissions, live ACL checks and explicit coverage. Typed result IDs support fetch; bare task IDs remain accepted.
+- Add separate Docs read/write OAuth scopes. Existing connections need new token permissions and consent for Docs.
+- Deploy the corresponding Venusaur scoped API changes first. Registry/npm publication and the OpenAI review update are separate release steps.
+
 ## Unreleased
 
 - Declare OpenAI package OAuth scopes and use the prepared Launch project in reviewer scenarios. Portal scope negotiation, live ChatGPT tests and the review video remain pending.
