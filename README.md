@@ -41,11 +41,11 @@ After **Allow access** or **Cancel**, the browser returns to your assistant auto
 | `list_tasks`, `get_task` | `tasks:read` | Filter tasks by project, status, assignee, priority, title and due dates; read task content |
 | `search`, `fetch` | Per-source read scope | Indexed tasks, Docs, files and project messages; typed result retrieval |
 | `list_docs`, `get_doc` | `docs:read` | Find Docs and read their Markdown content |
-| `create_doc`, `update_doc`, `edit_doc_content` | `docs:write` | Create, rename and edit Docs |
+| `create_doc`, `update_doc`, `edit_doc_content` | `docs:write`; body edits also need `docs:read` | Create, rename and edit Docs |
 | `list_conversations` | `chats:read` | Existing private conversations |
 | `read_messages` | `messages:read` | Accessible conversation messages |
 | `list_files` | `files:read` | File metadata |
-| `create_task`, `update_task`, `edit_task_content` | `tasks:write` | Create tasks; edit name, status, priority, assignees, dates and description |
+| `create_task`, `update_task`, `edit_task_content` | `tasks:write`; body edits also need `tasks:read` | Create tasks; edit name, status, priority, assignees, dates and description |
 | `send_message` | `messages:write` | Send the user's specified message |
 | `create_project` | `projects:write` | Create a project |
 | `upload_file` | `files:write` | Import a public HTTPS file |
