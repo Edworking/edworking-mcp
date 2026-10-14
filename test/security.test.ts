@@ -383,6 +383,11 @@ test('rich task edits preserve explicit nulls and empty assignees, and content t
   const editor = toolSpecs.find(x => x.name === 'edit_doc_content')!;
   assert.equal(editor.schema.safeParse({ requestId: args.requestId, id: 'doc-A', edits: Array(21).fill({ action: 'append', markdown: 'a' }) }).success, false);
   assert.equal(editor.schema.safeParse({ requestId: args.requestId, id: 'doc-A', edits: [{ action: 'bogus' }] }).success, false);
+  for (const kind of ['doc', 'task']) {
+    const bodyEditor = toolSpecs.find(x => x.name === `edit_${kind}_content`)!;
+    await assert.rejects(executeTool(bodyEditor, bodyEditor.schema.parse({ requestId: args.requestId, id: kind + '-A', edits: [{ action: 'append', markdown: 'new' }] }), context), /Reconnect with these permissions/);
+  }
+  assert.equal(f.api.calls.length, 1, 'Write-only content edits cannot read the body upstream');
 });
 
 test('persistent transports revalidate before cached writes and connection metadata', async t => {
