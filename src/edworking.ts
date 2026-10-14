@@ -21,11 +21,12 @@ export class Edworking {
     try {
       for (;;) { const { done, value } = await reader.read(); if (done) break; total += value.length; if (total > 2_000_000) { await reader.cancel(); throw new Error('large'); } chunks.push(value); }
     } catch { throw new ApiError('UPSTREAM_UNAVAILABLE', 'Edworking returned an unreadable response.'); }
-    let payload: { data?: T; errors?: { extensions?: { code?: string } }[] };
+    let payload: { data?: T; errors?: { message?: string; extensions?: { code?: string } }[] };
     try { payload = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
     catch { throw new ApiError('UPSTREAM_UNAVAILABLE', 'Edworking returned an invalid response.'); }
     if (payload.errors?.length) {
       const code = payload.errors[0]?.extensions?.code;
+      if (code === 'CONTENT_EDIT_REJECTED') throw new ApiError(code, (payload.errors[0]?.message || 'Read the content again before editing.').slice(0, 1000));
       if (code === 'FORBIDDEN' || code === 'UNAUTHENTICATED') throw new ApiError('UNAUTHORIZED', 'This connection cannot access the requested resource.');
       throw new ApiError('API_ERROR', 'Edworking rejected the request. Check the IDs, permissions, and field values.');
     }

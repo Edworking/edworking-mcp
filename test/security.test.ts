@@ -191,7 +191,7 @@ test('MCP SDK handshake, tool discovery, calls, scope denial and per-request ide
   const client = new Client({ name: 'security-test', version: '1.0.0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${tokens.access_token}` } } }));
   t.after(() => client.close());
-  const tools = await client.listTools(); assert.equal(tools.tools.length, 15);
+  const tools = await client.listTools(); assert.equal(tools.tools.length, 22);
   const read = await client.callTool({ name: 'list_projects', arguments: { limit: 1 } });
   assert.deepEqual(read.structuredContent, { items: [{ id: 'project-A', name: 'Launch', url: 'https://app.edworking.com/project-A/tasks' }], nextCursor: 'project-A' });
   assert.equal(f.api.calls[0]?.token, pat);
@@ -269,7 +269,7 @@ test('default upstream is the public gateway and production rejects cleartext up
   assert.throws(() => readConfig({ ...env, EDWORKING_API_URL: 'http://gateway.edworking.com/' }), /HTTPS/);
 });
 
-test('all 15 tools run through the MCP SDK, reject missing scopes and deduplicate writes', async t => {
+test('all 22 tools run through the MCP SDK, reject missing scopes and deduplicate writes', async t => {
   const f = fixture(); t.after(() => f.store.close());
   const a = await authorize(f, SCOPES.join(' '));
   const tokens = (await request(f.app).post('/oauth/token').type('form').send(a.body).expect(200)).body;
@@ -281,6 +281,14 @@ test('all 15 tools run through the MCP SDK, reject missing scopes and deduplicat
     apiCreateTask: { ...task, name: args.name }, apiUpdateTask: { ...task, name: args.name ?? task.name, deadline: args.deadline },
     apiSendMessage: { id: 'message-B', body: args.body }, apiCreateProject: { id: 'project-B', name: args.name },
     apiUploadFile: { id: 'file-B', name: args.name },
+    apiProjectMembers: [{ id: 'member-A', firstname: 'Demo' }],
+    apiDocs: [{ id: 'doc-A', title: 'QA Doc', projectId: 'project-A' }],
+    apiDoc: { id: 'doc-A', title: 'QA Doc', projectId: 'project-A', content: 'Body', contentTruncated: false },
+    apiCreateDoc: { id: 'doc-B', title: args.title, projectId: 'project-A' },
+    apiUpdateDoc: { id: 'doc-A', title: args.title, projectId: 'project-A' },
+    apiEditContent: { id: args.id, kind: args.kind, content: 'Edited', changes: ['appended'] },
+    apiSearch: { results: [{ id: 'task:task-A', type: 'task', title: 'QA task', snippet: 'Body', path: '/project-A/tasks/t/task-A' }], searchedSources: ['task'], unavailableSources: [], limitPerSource: 10, complete: false, note: 'Indexed' },
+    apiFetch: { id: 'task:task-A', title: 'QA task', text: 'Body', path: '/project-A/tasks/t/task-A', type: 'task' },
   });
   const server = f.app.listen(0, '127.0.0.1'); await new Promise<void>(r => server.once('listening', r));
   t.after(() => new Promise<void>(r => server.close(() => r())));
@@ -296,6 +304,11 @@ test('all 15 tools run through the MCP SDK, reject missing scopes and deduplicat
     update_task: { requestId: action, id: 'task-A', deadline: null }, send_message: { requestId: action, chat: { id: 'chat-A', kind: 'privat' }, body: 'QA send' },
     create_project: { requestId: action, name: 'QA new project' }, upload_file: { requestId: action, projectId: 'project-A', url: 'https://example.com/test.txt', name: 'QA upload' },
     search: { query: 'QA task' }, fetch: { id: 'task-A' },
+    list_project_members: { projectId: 'project-A' }, list_docs: {}, get_doc: { id: 'doc-A' },
+    create_doc: { requestId: action, projectId: 'project-A', title: 'QA Doc', content: 'Body' },
+    update_doc: { requestId: action, id: 'doc-A', title: 'Updated Doc' },
+    edit_doc_content: { requestId: action, id: 'doc-A', edits: [{ action: 'append', markdown: 'New paragraph' }] },
+    edit_task_content: { requestId: action, id: 'task-A', edits: [{ action: 'replace_text', find: 'old', replace: 'new' }] },
   };
   const catalog = await client.listTools();
   assert.deepEqual(catalog.tools.map(x => x.name).sort(), Object.keys(cases).sort());
@@ -340,16 +353,41 @@ test('all 15 tools run through the MCP SDK, reject missing scopes and deduplicat
   await client.close();
 });
 
-test('search enforces its 500-task and 50-result bounds with explicit coverage', async t => {
+test('search limits sources to OAuth grants and typed fetch checks its own read scope', async t => {
   const f = fixture(); t.after(() => f.store.close());
-  const a = await authorize(f), tokens = (await request(f.app).post('/oauth/token').type('form').send(a.body).expect(200)).body;
-  let page = 0;
-  f.api.respond = () => ({ apiTasks: Array.from({ length: 100 }, (_, i) => ({ id: 'task-' + (page * 100 + i), projectId: 'project-A', name: 'matching task' })).map((x, i) => { if (i === 99) page++; return x; }) });
+  const a = await authorize(f, 'tasks:read'), tokens = (await request(f.app).post('/oauth/token').type('form').send(a.body).expect(200)).body;
+  f.api.respond = () => ({ apiSearch: { results: [], searchedSources: ['task'], unavailableSources: ['task'], limitPerSource: 10, complete: false, note: 'Unavailable' } });
   const context = { api: f.api, identity: f.oauth.authenticate(tokens.access_token), store: f.store, config: f.config, vault: new Vault(f.config.encryptionKey) };
-  const result = await executeTool(toolSpecs.find(x => x.name === 'search')!, { query: 'matching' }, context);
-  assert.equal((result.results as unknown[]).length, 50);
-  assert.deepEqual(result.coverage, { scannedTasks: 500, complete: false, resultLimit: 50, truncatedMatches: true, searchedFields: ['task name'] });
-  assert.equal(f.api.calls.length, 5); assert.equal(f.api.calls[4]!.variables.after, 'task-399');
+  const spec = toolSpecs.find(x => x.name === 'search')!;
+  const result = await executeTool(spec, { query: 'matching' }, context);
+  assert.deepEqual(f.api.calls[0]!.variables.types, ['task']);
+  assert.deepEqual((result.coverage as Record<string, unknown>).unavailableSources, ['task']);
+  for (const [name, args] of [['search', { query: 'secret', types: ['doc'] }], ['fetch', { id: 'doc:doc-A' }]] as const) {
+    await assert.rejects(executeTool(toolSpecs.find(x => x.name === name)!, args, context), e => e instanceof ApiError && e.code === 'INSUFFICIENT_SCOPE');
+  }
+  assert.equal(f.api.calls.length, 1);
+  assert.equal(toolSpecs.find(x => x.name === 'fetch')!.schema.safeParse({ id: 'doc:../escape' }).success, false);
+});
+
+test('rich task edits preserve explicit nulls and empty assignees, and content tools enforce bounded edits', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  const a = await authorize(f, 'tasks:write docs:write'), tokens = (await request(f.app).post('/oauth/token').type('form').send(a.body).expect(200)).body;
+  f.api.respond = () => ({ apiUpdateTask: { id: 'task-A', name: 'Task' }, apiEditContent: { id: 'doc-A', content: 'new', changes: ['edited'] } });
+  const context = { api: f.api, identity: f.oauth.authenticate(tokens.access_token), store: f.store, config: f.config, vault: new Vault(f.config.encryptionKey) };
+  const spec = toolSpecs.find(x => x.name === 'update_task')!;
+  const args = spec.schema.parse({ requestId: '57e94532-f565-4e8e-8e02-9135b01224c3', id: 'task-A', stateProjectId: 'done', priority: null, assigneeIds: [], deadline: null });
+  await executeTool(spec, args, context);
+  assert.equal(f.api.calls[0]!.variables.priority, null); assert.deepEqual(f.api.calls[0]!.variables.assigneeIds, []);
+  assert.equal(f.api.calls[0]!.variables.name, undefined);
+  assert.equal(spec.schema.safeParse({ ...args, priority: 4 }).success, false);
+  const editor = toolSpecs.find(x => x.name === 'edit_doc_content')!;
+  assert.equal(editor.schema.safeParse({ requestId: args.requestId, id: 'doc-A', edits: Array(21).fill({ action: 'append', markdown: 'a' }) }).success, false);
+  assert.equal(editor.schema.safeParse({ requestId: args.requestId, id: 'doc-A', edits: [{ action: 'bogus' }] }).success, false);
+  for (const kind of ['doc', 'task']) {
+    const bodyEditor = toolSpecs.find(x => x.name === `edit_${kind}_content`)!;
+    await assert.rejects(executeTool(bodyEditor, bodyEditor.schema.parse({ requestId: args.requestId, id: kind + '-A', edits: [{ action: 'append', markdown: 'new' }] }), context), /Reconnect with these permissions/);
+  }
+  assert.equal(f.api.calls.length, 1, 'Write-only content edits cannot read the body upstream');
 });
 
 test('persistent transports revalidate before cached writes and connection metadata', async t => {
