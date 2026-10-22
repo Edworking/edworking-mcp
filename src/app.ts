@@ -10,6 +10,7 @@ import { Store } from './store.js';
 import { Vault } from './crypto.js';
 import { Edworking, ApiError } from './edworking.js';
 import { OAuth, OAuthError } from './oauth.js';
+import { pluginRouter } from './plugin.js';
 import { createMcp, toolSpecs, toolOutputSchemas } from './tools.js';
 import { landing, privacy, terms } from './pages.js';
 
@@ -21,6 +22,7 @@ export function createApp(config: Config, store: Store, api = new Edworking(conf
   app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], styleSrc: ["'unsafe-inline'"], imgSrc: ["'self'"], formAction: ["'self'"], frameAncestors: ["'none'"], baseUri: ["'none'"], upgradeInsecureRequests: config.production ? [] : null } }, referrerPolicy: { policy: 'same-origin' } }));
   app.get('/healthz', (_req, res) => res.json({ status: 'ok', service: 'bellsprout' }));
   app.get('/readyz', (_req, res) => { try { res.status(store.healthy() ? 200 : 503).json({ status: 'ready' }); } catch { res.status(503).json({ status: 'unavailable' }); } });
+  app.use('/plugin', express.json({ limit: '12mb' }), pluginRouter(oauth));
   app.use((req, res, next) => {
     if (req.path.startsWith('/oauth') || req.path === '/mcp') res.set('Cache-Control', 'no-store');
     const origin = req.get('origin');
