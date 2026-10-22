@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Extend existing task/Doc creation with optional Figma designs: native embeds, task Resources and explicit optional fields. The plugin sends the same input, so embeds are built only here.
+- Validate Figma designs against the viewer file-key format; reject unclosed Markdown code fences (`UNCLOSED_CODE_FENCE`) and oversized combined content (`CONTENT_TOO_LONG`) before creation.
+- Resume partial task Resource linking from an encrypted creation checkpoint without repeating creation; preserve scope checks and the original 24-hour retry window. A revocation while linking reports the created task. Figma backlinks and Doc page registration remain plugin actions.
+- Add Figma / Figma Make to the existing client setup accordion.
+- Add external SDK OAuth, HTTPS consent and HTTP/GraphQL failure regression coverage.
 - Reuse native Edworking consent and revocation for the Figma plugin and MCP clients.
 - Route the fixed Figma client through dedicated Edworking workspace selection, authorization and return, without a duplicate MCP consent screen. Keep browser binding, nonce, PKCE and one-use handoff checks.
 - Add isolated PKCE plugin return/polling and a restricted tool transport; keep general OAuth/MCP origin checks unchanged.

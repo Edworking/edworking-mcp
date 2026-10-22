@@ -11,7 +11,7 @@ import { createApp } from '../src/app.js';
 import { readConfig, SCOPES } from '../src/config.js';
 import { Edworking, ApiError } from '../src/edworking.js';
 import { Store } from '../src/store.js';
-import { Vault, random, challenge } from '../src/crypto.js';
+import { Vault, random, challenge, hash } from '../src/crypto.js';
 import { Clients, fetchClientDocument, validRedirect, matchesRedirect, pinnedLookup } from '../src/clients.js';
 import { executeTool, toolSpecs, pluginToolSpecs } from '../src/tools.js';
 
@@ -254,7 +254,7 @@ test('pinned DNS supports Node automatic address-family selection without a seco
   t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
   const address = server.address(); assert.ok(address && typeof address !== 'string');
   for (const autoSelectFamily of [true, false]) {
-    const socket = createConnection({ host: 'must-not-resolve.invalid', port: address.port, autoSelectFamily, lookup: pinnedLookup({ address: '127.0.0.1', family: 4 }) });
+    const socket: import('node:net').Socket = createConnection({ host: 'must-not-resolve.invalid', port: address.port, autoSelectFamily, lookup: pinnedLookup({ address: '127.0.0.1', family: 4 }) });
     t.after(() => socket.destroy());
     await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject); });
     assert.equal(socket.remoteAddress, '127.0.0.1');
@@ -339,6 +339,25 @@ test('all tools run through the MCP SDK, reject missing scopes and deduplicate w
       assert.equal(f.api.calls.length, before + 1, name + ' retried upstream');
     }
   }
+  for (const name of ['create_task', 'create_doc']) {
+    const args = { requestId: 'bac4f7f7-a061-48ce-a787-3347f9b64276', projectId: 'project-A', ...(name === 'create_task' ? { name: 'Figma task' } : { title: 'Figma Doc' }), figmaDesigns: [{ url: 'https://www.figma.com/design/Abc123Abc123Abc123Abc123?node-id=1-2', name: 'Frame' }] };
+    const before = f.api.calls.length, result = await client.callTool({ name, arguments: args });
+    assert.notEqual(result.isError, true, name + ' Figma output contract');
+    const figma = (result.structuredContent as Record<string, unknown>).figma as Record<string, unknown>;
+    assert.equal(figma.resources, name === 'create_task' ? 'linked' : 'not_applicable');
+    assert.equal(figma.backlinkCreated, false);
+    assert.equal(f.api.calls.length, before + (name === 'create_task' ? 2 : 1));
+    const variables = f.api.calls[before]!.variables;
+    assert.equal(variables.content, '[figma: Frame](https://www.figma.com/design/Abc123Abc123Abc123Abc123?node-id=1-2)');
+    if (name === 'create_task') {
+      assert.equal(variables.assigneeIds, undefined, 'Omitted assignees default to the connected user upstream');
+      for (const field of ['priority', 'startDate', 'deadline', 'stateProjectId', 'listId', 'fileIds']) assert.equal(variables[field], undefined, field + ' must not be invented');
+    }
+    const repeated = await client.callTool({ name, arguments: args });
+    assert.deepEqual(repeated.structuredContent, result.structuredContent);
+    assert.equal(f.api.calls.length, before + (name === 'create_task' ? 2 : 1));
+  }
+  assert.equal(f.api.calls.find(c => c.variables.name === 'QA new task')!.variables.assigneeIds, undefined, 'Ordinary creates retain the existing upstream default');
   const context = { api: f.api, identity: { ...f.oauth.authenticate(tokens.access_token), scopes: [] }, store: f.store, config: f.config, vault: new Vault(f.config.encryptionKey) };
   for (const spec of toolSpecs.filter(x => x.scopes.length)) {
     const before = f.api.calls.length;
@@ -462,7 +481,7 @@ test('a canonical Figma link can safely retry an uncertain response while task c
   const f=fixture();t.after(()=>f.store.close());
   const b=await authorize(f,'tasks:write'),tokens=(await request(f.app).post('/oauth/token').send(b.body).expect(200)).body;
   const identity=f.oauth.authenticate(tokens.access_token),spec=toolSpecs.find(s=>s.name==='link_figma_frame')!;
-  const args=spec.schema.parse({requestId:'15424dd2-441f-477d-b967-ed17e1dfdcf1',taskId:'task-A',url:'https://www.figma.com/design/Abc123?node-id=1-2'});
+  const args=spec.schema.parse({requestId:'15424dd2-441f-477d-b967-ed17e1dfdcf1',taskId:'task-A',url:'https://www.figma.com/design/Abc123Abc123Abc123Abc123?node-id=1-2'});
   const context={api:f.api,identity,config:f.config,store:f.store,vault:new Vault(f.config.encryptionKey)};
   f.api.failure=true;await assert.rejects(executeTool(spec,args,context));
   f.api.failure=false;f.api.respond=()=>({apiLinkFigmaFrame:{id:'link-A',url:args.url}});
@@ -540,4 +559,333 @@ test('native connection keeps the existing consent flow for non-Figma MCP client
     redirect_uri: b.params.redirect_uri, code: callback.searchParams.get('code'), code_verifier: b.verifier,
   }).expect(200);
   assert.equal(f.oauth.authenticate(tokens.body.access_token).upstream, pat);
+});
+
+test('Figma creates preserve requested task fields and files, and Docs only receive embeds', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  const b = await authorize(f, 'tasks:write docs:write files:write'), tokens = (await request(f.app).post('/oauth/token').send(b.body).expect(200)).body;
+  const context = { api: f.api, identity: f.oauth.authenticate(tokens.access_token), config: f.config, store: f.store, vault: new Vault(f.config.encryptionKey) };
+  f.api.respond = (_query, a) => ({ apiCreateTask: { id: 'task-A', name: a.name, projectId: a.projectId }, apiCreateDoc: { id: 'doc-A', title: a.title, projectId: a.projectId }, apiLinkFigmaFrame: { id: 'link-A', url: a.url } });
+  const task = toolSpecs.find(s => s.name === 'create_task')!, doc = toolSpecs.find(s => s.name === 'create_doc')!;
+  const designs = [{ url: 'https://figma.com/file/Abc123Abc123Abc123Abc123/Design?node-id=1%3A2&t=tracking', name: 'Old name' }, { url: 'https://www.figma.com/design/Abc123Abc123Abc123Abc123?node-id=1-2', name: 'Frame]\nOne' }];
+  const fields = { priority: 0, assigneeIds: ['user-A'], startDate: '2026-10-22T09:00:00Z', deadline: '2026-10-23T09:00:00Z', stateProjectId: 'state-A', listId: 'list-A', fileIds: ['file-A'] };
+  const args = task.schema.parse({ requestId: 'a87f44a5-6633-4c71-a41b-6dd5efb7f710', projectId: 'project-A', name: 'Design task', content: 'Existing **body**', figmaDesigns: designs, ...fields });
+  const result = await executeTool(task, args, context);
+  const variables = f.api.calls[0]!.variables;
+  assert.equal(variables.content, 'Existing **body**\n\n[figma: Frame  One](https://www.figma.com/design/Abc123Abc123Abc123Abc123?node-id=1-2)');
+  for (const [key, value] of Object.entries(fields)) assert.deepEqual(variables[key], value, key);
+  assert.equal(variables.figmaDesigns, undefined);
+  assert.equal(f.api.calls.length, 2, 'Equivalent links create just one Resource');
+  assert.equal((result.figma as Record<string, unknown>).resources, 'linked');
+  assert.equal((result.figma as Record<string, unknown>).backlinkCreated, false);
+  const docArgs = doc.schema.parse({ requestId: args.requestId, projectId: 'project-A', title: 'Design spec', folderId: 'folder-A', figmaDesigns: [designs[0]] });
+  const docResult = await executeTool(doc, docArgs, context);
+  assert.equal(f.api.calls.length, 3, 'Docs do not create task Resources or attachments');
+  assert.match(f.api.calls[2]!.variables.content as string, /^\[figma: Old name\]\(https:\/\/www.figma.com\/design\/Abc123Abc123Abc123Abc123\?node-id=1-2\)$/);
+  assert.equal(f.api.calls[2]!.variables.folderId, 'folder-A');
+  assert.equal(f.api.calls[2]!.variables.fileIds, undefined);
+  assert.deepEqual(docResult.figma, { designs: [{ url: 'https://www.figma.com/design/Abc123Abc123Abc123Abc123?node-id=1-2', name: 'Old name' }], resources: 'not_applicable', pendingResources: [], backlinkCreated: false, docPageListingUpdated: false });
+  assert.deepEqual(await executeTool(doc, docArgs, context), docResult);
+  assert.equal(f.api.calls.length, 3);
+});
+
+test('Figma validation rejects unsupported links and oversized combined content before reserving a write', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  const b = await authorize(f, 'tasks:write'), tokens = (await request(f.app).post('/oauth/token').send(b.body).expect(200)).body;
+  const context = { api: f.api, identity: f.oauth.authenticate(tokens.access_token), config: f.config, store: f.store, vault: new Vault(f.config.encryptionKey) };
+  const spec = toolSpecs.find(s => s.name === 'create_task')!;
+  const args = { requestId: '827a81e0-4b34-4ce2-8b1b-7766958c96a6', projectId: 'project-A', name: 'Design', figmaDesigns: [{ url: 'https://www.figma.com/design/Abc123Abc123Abc123Abc123?node-id=1-2' }] };
+  for (const url of ['https://www.figma.com/design/Abc123?node-id=1-2', 'https://evil.example/design/Abc123Abc123Abc123Abc123?node-id=1-2', 'https://figma.com.evil.example/design/Abc123Abc123Abc123Abc123?node-id=1-2', 'http://www.figma.com/design/Abc123Abc123Abc123Abc123?node-id=1-2', 'https://user:secret@figma.com/design/Abc123Abc123Abc123Abc123?node-id=1-2', 'https://www.figma.com:444/design/Abc123Abc123Abc123Abc123?node-id=1-2', 'https://www.figma.com/design/Abc123Abc123Abc123Abc123', 'https://www.figma.com/design/Abc123Abc123Abc123Abc123?node-id=bogus', 'https://www.figma.com/make/Abc123Abc123Abc123Abc123?node-id=1-2']) {
+    assert.equal(spec.schema.safeParse({ ...args, figmaDesigns: [{ url }] }).success, false, url);
+  }
+  for (const figmaDesigns of [[], Array(21).fill(args.figmaDesigns[0])]) assert.equal(spec.schema.safeParse({ ...args, figmaDesigns }).success, false);
+  for (const [extra, code] of [[{ content: 'a'.repeat(20000) }, 'CONTENT_TOO_LONG'], [{ description: 'legacy body' }, 'INVALID_INPUT']] as const) {
+    await assert.rejects(executeTool(spec, spec.schema.parse({ ...args, ...extra }), context), e => e instanceof ApiError && e.code === code);
+  }
+  assert.equal(f.api.calls.length, 0);
+  f.api.respond = () => ({ apiCreateTask: { id: 'task-A', projectId: 'project-A' }, apiLinkFigmaFrame: { id: 'link-A' } });
+  await executeTool(spec, spec.schema.parse(args), context);
+  assert.equal(f.api.calls.length, 2, 'Validation failures did not reserve the requestId');
+});
+
+test('Figma task retries resume encrypted Resource progress after restart without repeating creation', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'edworking-mcp-figma-')), path = join(dir, 'state.sqlite');
+  const f = fixture(path); let store = f.store;
+  t.after(() => { store.close(); assert.ok(dir.startsWith(join(tmpdir(), 'edworking-mcp-figma-'))); rmSync(dir, { recursive: true, force: true }); });
+  const b = await authorize(f, 'tasks:write'), tokens = (await request(f.app).post('/oauth/token').send(b.body).expect(200)).body;
+  const context = { api: f.api, identity: f.oauth.authenticate(tokens.access_token), config: f.config, store, vault: new Vault(f.config.encryptionKey), validateIdentity: async () => { await f.api.tokenInfo(pat); } };
+  const spec = toolSpecs.find(s => s.name === 'create_task')!;
+  const designs = [1, 2, 3].map(n => ({ url: 'https://www.figma.com/design/Abc123Abc123Abc123Abc123?node-id=1-' + n, name: 'Frame ' + n }));
+  const args = spec.schema.parse({ requestId: 'e1da1480-a14f-4094-86b0-21d5d727761f', projectId: 'project-A', name: 'Private resumable task', figmaDesigns: designs });
+  let failLink = true;
+  f.api.respond = (query, a) => {
+    if (query.includes('apiCreateTask')) return { apiCreateTask: { id: 'task-A', name: a.name, projectId: a.projectId } };
+    if (failLink && a.url === designs[1]!.url) throw new ApiError('UPSTREAM_UNAVAILABLE', 'Lost response');
+    return { apiLinkFigmaFrame: { id: 'link-A', url: a.url } };
+  };
+  const first = await executeTool(spec, args, context), figma = first.figma as Record<string, unknown>;
+  assert.equal(figma.resources, 'pending'); assert.deepEqual(figma.pendingResources, designs.slice(1));
+  assert.equal((first.task as Record<string, unknown>).id, 'task-A');
+  const key = hash(context.identity.grant.info.id + ':create_task:' + args.requestId);
+  const saved = store.get<{ fingerprint: string; created: string; expires: number }>('mutation', key)!;
+  assert.ok(saved.created); assert.ok(!JSON.stringify(saved).includes('Private resumable task'));
+  assert.deepEqual(JSON.parse(context.vault.open(saved.created)).response.task, first.task);
+  const before = f.api.calls.length;
+  await assert.rejects(executeTool(spec, { ...args, name: 'Changed' }, context), e => e instanceof ApiError && e.code === 'IDEMPOTENCY_CONFLICT');
+  await assert.rejects(executeTool(spec, args, { ...context, identity: { ...context.identity, scopes: [] } }), e => e instanceof ApiError && e.code === 'INSUFFICIENT_SCOPE');
+  f.api.revoked = true; await assert.rejects(executeTool(spec, args, context), /Revoked/); f.api.revoked = false;
+  assert.equal(f.api.calls.length, before);
+  store.close(); assert.ok(!readFileSync(path).includes(Buffer.from('Private resumable task')));
+  store = new Store(path); context.store = store;
+  const set = store.set.bind(store), expiries: number[] = [];
+  store.set = (kind, id, value, expiry) => { if (kind === 'mutation') expiries.push(expiry); set(kind, id, value, expiry); };
+  failLink = false;
+  const completed = await executeTool(spec, args, context);
+  assert.equal((completed.figma as Record<string, unknown>).resources, 'linked');
+  assert.equal(f.api.calls.filter(c => c.query.includes('apiCreateTask')).length, 1);
+  assert.deepEqual(f.api.calls.filter(c => c.query.includes('apiLinkFigmaFrame')).map(c => c.variables.url), [designs[0]!.url, designs[1]!.url, designs[1]!.url, designs[2]!.url]);
+  assert.ok(expiries.length > 0 && expiries.every(expiry => expiry === saved.expires), 'Retries keep the original expiry');
+  assert.deepEqual(await executeTool(spec, args, context), completed); assert.equal(f.api.calls.length, 5);
+  f.api.revoked = true; await assert.rejects(executeTool(spec, args, context), /Revoked/);
+});
+
+test('Figma creation never repeats an uncertain create or links a missing create result', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  const b = await authorize(f, 'tasks:write docs:write'), tokens = (await request(f.app).post('/oauth/token').send(b.body).expect(200)).body;
+  const context = { api: f.api, identity: f.oauth.authenticate(tokens.access_token), config: f.config, store: f.store, vault: new Vault(f.config.encryptionKey) };
+  for (const name of ['create_task', 'create_doc']) {
+    const spec = toolSpecs.find(s => s.name === name)!;
+    for (const failure of [true, false]) {
+      const args = spec.schema.parse({ requestId: failure ? 'b23a916b-8b0b-46e0-8519-2a0f1fd569c9' : '375104ec-15fd-4f35-b218-17c099661652', projectId: 'project-A', name: 'Task', title: 'Doc', figmaDesigns: [{ url: 'https://www.figma.com/design/Abc123Abc123Abc123Abc123?node-id=1-2' }] });
+      const before = f.api.calls.length; f.api.failure = failure; f.api.respond = () => ({ apiCreateTask: null, apiCreateDoc: null });
+      await assert.rejects(executeTool(spec, args, context));
+      f.api.failure = false;
+      await assert.rejects(executeTool(spec, args, context), e => e instanceof ApiError && e.code === 'RESULT_UNCERTAIN');
+      assert.equal(f.api.calls.length, before + 1);
+    }
+  }
+});
+
+test('concurrent Figma creation calls cannot create a second task while the first result is pending', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  const b = await authorize(f, 'tasks:write'), tokens = (await request(f.app).post('/oauth/token').send(b.body).expect(200)).body;
+  const context = { api: f.api, identity: f.oauth.authenticate(tokens.access_token), config: f.config, store: f.store, vault: new Vault(f.config.encryptionKey) };
+  const spec = toolSpecs.find(s => s.name === 'create_task')!, args = spec.schema.parse({ requestId: 'ea950d61-c2c9-42d4-bad2-bfc03856e477', projectId: 'project-A', name: 'One task', figmaDesigns: [{ url: 'https://www.figma.com/design/Abc123Abc123Abc123Abc123?node-id=1-2' }] });
+  let release!: () => void, started!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; }), entered = new Promise<void>(resolve => { started = resolve; });
+  const execute = f.api.execute.bind(f.api);
+  f.api.execute = async <T>(token: string, query: string, variables: Record<string, unknown> = {}): Promise<T> => {
+    if (query.includes('apiCreateTask')) { started(); await gate; }
+    return execute<T>(token, query, variables);
+  };
+  f.api.respond = () => ({ apiCreateTask: { id: 'task-A', projectId: 'project-A' }, apiLinkFigmaFrame: { id: 'link-A' } });
+  const first = executeTool(spec, args, context); await entered;
+  try { await assert.rejects(executeTool(spec, args, context), e => e instanceof ApiError && e.code === 'RESULT_UNCERTAIN'); }
+  finally { release(); }
+  const result = await first; assert.deepEqual(await executeTool(spec, args, context), result);
+  assert.equal(f.api.calls.length, 2);
+});
+
+test('Figma creates enforce task, Doc and attachment scopes and do not hide revoked linking permissions', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  const b = await authorize(f, 'tasks:write'), tokens = (await request(f.app).post('/oauth/token').send(b.body).expect(200)).body;
+  const context = { api: f.api, identity: f.oauth.authenticate(tokens.access_token), config: f.config, store: f.store, vault: new Vault(f.config.encryptionKey) };
+  const task = toolSpecs.find(s => s.name === 'create_task')!, doc = toolSpecs.find(s => s.name === 'create_doc')!;
+  const args = { requestId: 'a419772e-9cb4-4531-92fa-e71c4ce2cfd8', projectId: 'project-A', name: 'Task', figmaDesigns: [{ url: 'https://www.figma.com/design/Abc123Abc123Abc123Abc123?node-id=1-2' }] };
+  await assert.rejects(executeTool(task, task.schema.parse({ ...args, fileIds: ['file-A'] }), context), e => e instanceof ApiError && e.code === 'INSUFFICIENT_SCOPE');
+  await assert.rejects(executeTool(doc, doc.schema.parse({ ...args, title: 'Doc' }), context), e => e instanceof ApiError && e.code === 'INSUFFICIENT_SCOPE');
+  await assert.rejects(executeTool(task, task.schema.parse(args), { ...context, identity: { ...context.identity, scopes: [] } }), e => e instanceof ApiError && e.code === 'INSUFFICIENT_SCOPE');
+  assert.equal(f.api.calls.length, 0);
+  f.api.respond = query => {
+    if (query.includes('apiCreateTask')) return { apiCreateTask: { id: 'task-A', projectId: 'project-A' } };
+    throw new ApiError('UNAUTHORIZED', 'Access revoked');
+  };
+  await assert.rejects(executeTool(task, task.schema.parse(args), context), e => e instanceof ApiError && e.code === 'UNAUTHORIZED'
+    && e.message.includes('/tasks/t/task-A was already created') && e.message.includes(args.figmaDesigns[0]!.url));
+  f.api.respond = () => ({ apiLinkFigmaFrame: { id: 'link-A' } });
+  assert.equal((await executeTool(task, task.schema.parse(args), context)).figma && f.api.calls.length, 3, 'A confirmed create is not repeated after a link rejection');
+});
+
+test('external MCP SDK completes discovery, Figma callback PKCE, explicit write consent, refresh and revocation', async t => {
+  const { auth } = await import('@modelcontextprotocol/sdk/client/auth.js');
+  const f = fixture();
+  const server = f.app.listen(0, '127.0.0.1'); await new Promise<void>(r => server.once('listening', r));
+  const address = server.address(); assert.ok(address && typeof address !== 'string');
+  f.config.origin = `http://127.0.0.1:${address.port}`; f.config.resource = f.config.origin + '/mcp';
+  f.config.allowedOrigins.push(f.config.origin);
+  const clients: Client[] = [];
+  t.after(async () => { for (const client of clients) await client.close(); await new Promise<void>(r => server.close(() => r())); f.store.close(); });
+  let registration: import('@modelcontextprotocol/sdk/shared/auth.js').OAuthClientInformationMixed | undefined;
+  let tokens: import('@modelcontextprotocol/sdk/shared/auth.js').OAuthTokens | undefined;
+  let authorization: URL | undefined, verifier = '';
+  const callbackUrl = 'https://www.figma.com/oauth/mcp/callback';
+  const provider: import('@modelcontextprotocol/sdk/client/auth.js').OAuthClientProvider = {
+    redirectUrl: callbackUrl,
+    clientMetadata: { client_name: 'Figma compatibility test', redirect_uris: [callbackUrl], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'] },
+    clientInformation: () => registration, saveClientInformation: value => { registration = value; },
+    tokens: () => tokens, saveTokens: value => { tokens = value; },
+    redirectToAuthorization: value => { authorization = value; },
+    saveCodeVerifier: value => { verifier = value; }, codeVerifier: () => verifier,
+    state: () => 'synthetic-figma-state',
+  };
+  const paths: string[] = [];
+  const localFetch: typeof fetch = async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    assert.equal(url.origin, f.config.origin, 'Synthetic credentials never leave the test listener');
+    paths.push(url.pathname); return fetch(input, init);
+  };
+  async function approve(scope?: string) {
+    assert.equal(await auth(provider, { serverUrl: f.config.resource, scope, fetchFn: localFetch }), 'REDIRECT');
+    assert.ok(authorization);
+    assert.equal(authorization.searchParams.get('redirect_uri'), callbackUrl);
+    assert.equal(authorization.searchParams.get('code_challenge_method'), 'S256');
+    assert.equal(authorization.searchParams.get('code_challenge'), challenge(verifier));
+    assert.equal(authorization.searchParams.get('resource'), f.config.resource);
+    const browser = request.agent(f.app);
+    const started = await browser.get(authorization.pathname + authorization.search).expect(303);
+    const page = await browser.get(started.headers.location).expect(200);
+    const id = new URL(started.headers.location, f.config.origin).searchParams.get('request')!;
+    const csrf = page.text.match(/name="csrf" value="([^"]+)"/)![1];
+    await browser.post('/oauth/link-token').set('Origin', f.config.origin).type('form').send({ request: id, csrf, api_token: pat }).expect(303);
+    const approved = await browser.post('/oauth/approve').set('Origin', f.config.origin).type('form').send({ request: id, csrf, decision: 'approve' }).expect(200);
+    const callback = callbackFromPage(approved);
+    assert.equal(callback.origin + callback.pathname, callbackUrl);
+    assert.equal(callback.searchParams.get('state'), 'synthetic-figma-state');
+    assert.equal(callback.searchParams.get('iss'), f.config.origin);
+    assert.equal(await auth(provider, { serverUrl: f.config.resource, authorizationCode: callback.searchParams.get('code')!, fetchFn: localFetch }), 'AUTHORIZED');
+    assert.ok(tokens); assert.ok(!JSON.stringify(tokens).includes(pat));
+  }
+  async function connect() {
+    const client = new Client({ name: 'synthetic-figma-client', version: '1.0.0' }); clients.push(client);
+    await client.connect(new StreamableHTTPClientTransport(new URL(f.config.resource), { authProvider: provider, fetch: localFetch }));
+    return client;
+  }
+  await approve();
+  assert.ok(tokens!.scope!.split(' ').every(scope => scope.endsWith(':read')));
+  const reader = await connect();
+  const discovered = await reader.listTools(); assert.equal(discovered.tools.length, 24);
+  for (const name of ['create_task', 'create_doc']) {
+    const spec = discovered.tools.find(tool => tool.name === name)!;
+    assert.ok(spec.inputSchema.properties?.figmaDesigns); assert.equal(spec.annotations?.readOnlyHint, false);
+  }
+  const taskArgs = { requestId: '39d43596-6ad4-469d-a85d-b781fbdc47d5', projectId: 'project-A', name: 'SDK design task', figmaDesigns: [{ url: 'https://www.figma.com/design/Abc123Abc123Abc123Abc123?node-id=0-1' }] };
+  const denied = await reader.callTool({ name: 'create_task', arguments: taskArgs });
+  assert.equal(denied.isError, true); assert.match(JSON.stringify(denied._meta), /insufficient_scope.*tasks:write/);
+  assert.equal(f.api.calls.length, 0);
+  const registrationId = registration!.client_id;
+  // Consent is explicit: refreshing a read grant must never silently add writes.
+  tokens = undefined;
+  await approve('projects:read tasks:read tasks:write docs:read docs:write');
+  assert.equal(registration!.client_id, registrationId);
+  const writer = await connect();
+  f.api.respond = (_query, a) => ({ apiCreateTask: { id: 'task-A', name: a.name, projectId: a.projectId }, apiCreateDoc: { id: 'doc-A', title: a.title, projectId: a.projectId }, apiLinkFigmaFrame: { id: 'link-A', url: a.url } });
+  const created = await writer.callTool({ name: 'create_task', arguments: taskArgs });
+  assert.notEqual(created.isError, true); assert.equal(((created.structuredContent as Record<string, unknown>).figma as Record<string, unknown>).resources, 'linked');
+  assert.equal(f.api.calls[0]!.variables.assigneeIds, undefined);
+  for (const field of ['priority', 'deadline', 'startDate', 'fileIds']) assert.equal(f.api.calls[0]!.variables[field], undefined);
+  const doc = await writer.callTool({ name: 'create_doc', arguments: { ...taskArgs, title: 'SDK design Doc' } });
+  assert.notEqual(doc.isError, true); assert.equal(((doc.structuredContent as Record<string, unknown>).figma as Record<string, unknown>).resources, 'not_applicable');
+  assert.equal(f.api.calls.length, 3);
+  const refreshBefore = tokens!.refresh_token;
+  assert.equal(await auth(provider, { serverUrl: f.config.resource, fetchFn: localFetch }), 'AUTHORIZED');
+  assert.notEqual(tokens!.refresh_token, refreshBefore);
+  assert.deepEqual((await writer.callTool({ name: 'create_task', arguments: taskArgs })).structuredContent, created.structuredContent);
+  assert.equal(f.api.calls.length, 3, 'Refresh retains cached action identity');
+  await request(f.app).post('/oauth/revoke').type('form').send({ client_id: registration!.client_id, token: tokens!.refresh_token }).expect(200);
+  await request(f.app).post('/mcp').set('Authorization', 'Bearer ' + tokens!.access_token).send({}).expect(401);
+  for (const path of ['/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-authorization-server', '/oauth/register', '/oauth/token', '/mcp']) assert.ok(paths.includes(path), path);
+});
+
+test('Figma write consent rejects an upstream token missing Doc permissions', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  f.api.identity.scopes = ['projects:read', 'tasks:read', 'tasks:write'];
+  const b = await begin(f, 'tasks:write docs:write');
+  const denied = await b.browser.post('/oauth/link-token').set('Origin', f.config.origin).type('form').send({ request: b.id, csrf: b.csrf, api_token: pat }).expect(400);
+  assert.match(denied.text, /does not include all requested permissions/);
+  await b.browser.post('/oauth/approve').set('Origin', f.config.origin).type('form').send({ request: b.id, csrf: b.csrf, decision: 'approve' }).expect(400);
+  assert.equal(f.api.calls.length, 0);
+});
+
+test('Figma Resource retries handle actual HTTP and GraphQL adapter failures without recreating tasks', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  const b = await authorize(f, 'tasks:write'), tokens = (await request(f.app).post('/oauth/token').send(b.body).expect(200)).body;
+  const spec = toolSpecs.find(s => s.name === 'create_task')!;
+  for (const failure of ['429', '503', 'graphql', 'invalid-json', 'empty-data', 'missing-link', 'network', 'forbidden']) {
+    let fail = true; const operations: string[] = [];
+    const api = new Edworking('https://synthetic.example/graphql', async (_input, init) => {
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer ' + pat);
+      assert.equal(init?.redirect, 'error');
+      const body = JSON.parse(String(init?.body)); operations.push(body.query);
+      if (body.query.includes('apiCreateTask')) return Response.json({ data: { apiCreateTask: { id: 'task-A', projectId: 'project-A' } } });
+      if (fail) {
+        if (failure === 'network') throw new TypeError('synthetic disconnection');
+        if (failure === '429' || failure === '503') return new Response('', { status: Number(failure) });
+        if (failure === 'invalid-json') return new Response('invalid');
+        if (failure === 'empty-data') return Response.json({});
+        if (failure === 'missing-link') return Response.json({ data: { apiLinkFigmaFrame: null } });
+        return Response.json({ errors: [{ message: 'synthetic private diagnostic', extensions: { code: failure === 'forbidden' ? 'FORBIDDEN' : 'INTERNAL_SERVER_ERROR' } }] });
+      }
+      return Response.json({ data: { apiLinkFigmaFrame: { id: 'link-A', url: body.variables.url } } });
+    });
+    const context = { api, identity: f.oauth.authenticate(tokens.access_token), config: f.config, store: f.store, vault: new Vault(f.config.encryptionKey) };
+    const args = spec.schema.parse({ requestId: (await import('node:crypto')).randomUUID(), projectId: 'project-A', name: failure, figmaDesigns: [{ url: 'https://www.figma.com/design/Abc123Abc123Abc123Abc123?node-id=1-2' }] });
+    if (failure === 'forbidden') await assert.rejects(executeTool(spec, args, context), e => e instanceof ApiError && e.code === 'UNAUTHORIZED');
+    else {
+      const pending = await executeTool(spec, args, context);
+      assert.equal((pending.figma as Record<string, unknown>).resources, 'pending');
+      assert.equal((pending.task as Record<string, unknown>).id, 'task-A');
+      assert.ok(!JSON.stringify(pending).includes('private diagnostic'));
+    }
+    fail = false;
+    assert.equal(((await executeTool(spec, args, context)).figma as Record<string, unknown>).resources, 'linked');
+    assert.equal(operations.filter(source => source.includes('apiCreateTask')).length, 1);
+    assert.equal(operations.length, 3);
+  }
+});
+
+test('Figma embeds cannot be swallowed by an unclosed Markdown code fence', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  const b = await authorize(f, 'tasks:write docs:write'), tokens = (await request(f.app).post('/oauth/token').send(b.body).expect(200)).body;
+  const context = { api: f.api, identity: f.oauth.authenticate(tokens.access_token), config: f.config, store: f.store, vault: new Vault(f.config.encryptionKey) };
+  f.api.respond = () => ({ apiCreateTask: { id: 'task-A', projectId: 'project-A' }, apiCreateDoc: { id: 'doc-A', projectId: 'project-A' }, apiLinkFigmaFrame: { id: 'link-A' } });
+  for (const name of ['create_task', 'create_doc']) {
+    const spec = toolSpecs.find(s => s.name === name)!;
+    for (const content of ['```tsx\nconst a = 1;', '  ~~~~c++\r\ncode\r\n~~~', '[abcdef12] ```js\ncode']) {
+      const args = spec.schema.parse({ requestId: (await import('node:crypto')).randomUUID(), projectId: 'project-A', name: 'Task', title: 'Doc', content, figmaDesigns: [{ url: 'https://www.figma.com/design/Abc123Abc123Abc123Abc123?node-id=1-2' }] });
+      const before = f.api.calls.length;
+      await assert.rejects(executeTool(spec, args, context), e => e instanceof ApiError && e.code === 'UNCLOSED_CODE_FENCE');
+      assert.equal(f.api.calls.length, before);
+      const fixed = { ...args, content: '```tsx\nconst a = 1;\n```' };
+      await executeTool(spec, fixed, context);
+      assert.equal(f.api.calls.length, before + (name === 'create_task' ? 2 : 1), 'Validation does not reserve requestId');
+    }
+  }
+});
+
+test('HTTPS proxy consent uses secure browser cookies and preserves the exact Figma callback', async t => {
+  const config = readConfig({ NODE_ENV: 'production', PUBLIC_BASE_URL: 'https://mcp-test.example', TOKEN_ENCRYPTION_KEY: 'a'.repeat(64), DATABASE_PATH: ':memory:' });
+  const store = new Store(':memory:'), api = new FakeApi(), f = createApp(config, store, api); t.after(() => store.close());
+  const callbackUrl = 'https://www.figma.com/oauth/mcp/callback';
+  const client = (await request(f.app).post('/oauth/register').send({ client_name: 'Synthetic Figma HTTPS test', redirect_uris: [callbackUrl], token_endpoint_auth_method: 'none' }).expect(201)).body;
+  const verifier = random();
+  const parameters = { response_type: 'code', client_id: client.client_id, redirect_uri: callbackUrl, code_challenge_method: 'S256', code_challenge: challenge(verifier), resource: config.resource, scope: 'tasks:write docs:write', state: 'https-state' };
+  const started = await request(f.app).get('/oauth/authorize').set('X-Forwarded-Proto', 'https').query(parameters).expect(303);
+  const cookies = started.headers['set-cookie'] as unknown as string[];
+  const session = cookies.find(value => value.startsWith('__Host-bellsprout_session='))!;
+  assert.ok(session); for (const flag of ['Path=/', 'HttpOnly', 'Secure', 'SameSite=Lax']) assert.ok(session.includes(flag), flag);
+  assert.ok(!/Domain=/i.test(session));
+  const cookie = session.split(';')[0]!;
+  const page = await request(f.app).get(started.headers.location).set('Cookie', cookie).expect(200);
+  const csrf = page.text.match(/name="csrf" value="([^"]+)"/)![1], id = new URL(started.headers.location, config.origin).searchParams.get('request')!;
+  assert.match(page.headers['content-security-policy'], /form-action 'self'/);
+  await request(f.app).post('/oauth/link-token').set('Cookie', cookie).set('Origin', config.origin).type('form').send({ request: id, csrf, api_token: pat }).expect(303);
+  const approved = await request(f.app).post('/oauth/approve').set('Cookie', cookie).set('Origin', config.origin).type('form').send({ request: id, csrf, decision: 'approve' }).expect(200);
+  const callback = callbackFromPage(approved);
+  assert.equal(callback.origin + callback.pathname, callbackUrl); assert.equal(callback.searchParams.get('iss'), config.origin); assert.equal(callback.searchParams.get('state'), 'https-state');
+  const tokens = (await request(f.app).post('/oauth/token').type('form').send({ grant_type: 'authorization_code', client_id: client.client_id, redirect_uri: callbackUrl, resource: config.resource, code_verifier: verifier, code: callback.searchParams.get('code') }).expect(200)).body;
+  assert.deepEqual(f.oauth.authenticate(tokens.access_token).scopes, ['tasks:write', 'docs:write']);
+  const metadata = await request(f.app).get('/.well-known/oauth-authorization-server').expect(200);
+  assert.equal(metadata.body.issuer, config.origin); assert.deepEqual(metadata.body.token_endpoint_auth_methods_supported, ['none']);
+  const anonymous = await request(f.app).post('/mcp').send({}).expect(401);
+  assert.match(anonymous.headers['www-authenticate'], /https:\/\/mcp-test\.example\/\.well-known\/oauth-protected-resource\/mcp/);
 });
