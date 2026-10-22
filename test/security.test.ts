@@ -13,7 +13,7 @@ import { Edworking, ApiError } from '../src/edworking.js';
 import { Store } from '../src/store.js';
 import { Vault, random, challenge } from '../src/crypto.js';
 import { Clients, fetchClientDocument, validRedirect, matchesRedirect, pinnedLookup } from '../src/clients.js';
-import { executeTool, toolSpecs } from '../src/tools.js';
+import { executeTool, toolSpecs, pluginToolSpecs } from '../src/tools.js';
 
 const pat = `edw_pat_${'x'.repeat(43)}`;
 const info = { id: 'token-A', name: 'My assistant', userId: 'user-A', teamId: 'team-A', scopes: [...SCOPES], expiresAt: new Date(Date.now() + 86400_000).toISOString() };
@@ -191,7 +191,7 @@ test('MCP SDK handshake, tool discovery, calls, scope denial and per-request ide
   const client = new Client({ name: 'security-test', version: '1.0.0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${tokens.access_token}` } } }));
   t.after(() => client.close());
-  const tools = await client.listTools(); assert.equal(tools.tools.length, 22);
+  const tools = await client.listTools(); assert.equal(tools.tools.length, 24);
   const read = await client.callTool({ name: 'list_projects', arguments: { limit: 1 } });
   assert.deepEqual(read.structuredContent, { items: [{ id: 'project-A', name: 'Launch', url: 'https://app.edworking.com/project-A/tasks' }], nextCursor: 'project-A' });
   assert.equal(f.api.calls[0]?.token, pat);
@@ -269,13 +269,15 @@ test('default upstream is the public gateway and production rejects cleartext up
   assert.throws(() => readConfig({ ...env, EDWORKING_API_URL: 'http://gateway.edworking.com/' }), /HTTPS/);
 });
 
-test('all 22 tools run through the MCP SDK, reject missing scopes and deduplicate writes', async t => {
+test('all tools run through the MCP SDK, reject missing scopes and deduplicate writes', async t => {
   const f = fixture(); t.after(() => f.store.close());
   const a = await authorize(f, SCOPES.join(' '));
   const tokens = (await request(f.app).post('/oauth/token').type('form').send(a.body).expect(200)).body;
   const task = { id: 'task-A', name: 'QA task', projectId: 'project-A', deadline: null, users: [] };
   f.api.respond = (_query, args) => ({
+    apiConnectionContext: {user:{id:'user-A'},workspace:{id:'team-A',name:'QA workspace'}}, apiDocFolders: [{id:'folder-A',name:'Specs'}], apiInsertFigmaDesign: {id:'task-A',inserted:true},
     apiProjects: [{ id: 'project-A', name: 'QA project' }], apiProjectStates: [{ id: 'state-A', value: 'Open' }],
+    apiFigmaTasks: [task], apiLinkFigmaFrame: { id: "link-A", url: "https://www.figma.com/design/abcdef?node-id=1-2", title: "Frame" },
     apiTasks: [task], apiTask: task, apiPrivateChats: [{ id: 'chat-A', name: 'QA private chat' }],
     apiMessages: [{ id: 'message-A', body: 'QA message' }], apiFiles: [{ id: 'file-A', name: 'QA file' }],
     apiCreateTask: { ...task, name: args.name }, apiUpdateTask: { ...task, name: args.name ?? task.name, deadline: args.deadline },
@@ -298,6 +300,11 @@ test('all 22 tools run through the MCP SDK, reject missing scopes and deduplicat
   t.after(() => client.close());
   const action = 'a68a95be-8e0f-4c92-a99b-e9c9f5a51b73';
   const cases: Record<string, Record<string, unknown>> = {
+
+
+
+    list_figma_tasks: { url: "https://www.figma.com/design/abcdef?node-id=1-2" },
+    link_figma_frame: { requestId: action, taskId: "task-A", url: "https://www.figma.com/design/abcdef?node-id=1-2", title: "Frame" },
     get_connection: {}, list_projects: {}, list_project_statuses: { projectId: 'project-A' }, list_tasks: { projectId: 'project-A' },
     get_task: { id: 'task-A' }, list_conversations: {}, read_messages: { chat: { id: 'chat-A', kind: 'privat' } },
     list_files: { projectId: 'project-A' }, create_task: { requestId: action, projectId: 'project-A', name: 'QA new task' },
@@ -409,4 +416,128 @@ test('untrusted origins, malformed bodies and oversized requests fail without up
   await request(f.app).post('/mcp').send({ value: 'x'.repeat(270000) }).expect(413);
   await request(f.app).post('/mcp').set('Authorization', 'Bearer ' + pat).send({}).expect(401);
   assert.equal(f.api.calls.length, 0);
+});
+
+test('plugin connection binds PKCE, callback and client; general OAuth and MCP keep rejecting null origins', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  await request(f.app).post('/oauth/token').set('Origin', 'null').send({}).expect(403);
+  await request(f.app).post('/mcp').set('Origin', 'null').send({}).expect(403);
+  await request(f.app).post('/oauth/link').set('Origin', 'null').send({}).expect(403);
+  const verifier = random();
+  const started = await request(f.app).post('/plugin/start').set('Origin', 'null').send({ challenge: challenge(verifier) }).expect(200);
+  assert.equal(started.headers['access-control-allow-origin'], '*');
+  assert.equal(started.headers['access-control-allow-credentials'], undefined);
+  const start = started.body, authorize = new URL(start.url), browser = request.agent(f.app);
+  assert.equal(authorize.searchParams.get('scope'), 'projects:read tasks:read tasks:write docs:read docs:write files:read files:write');
+  await request(f.app).post('/plugin/poll').send({ id: start.id, verifier: random() }).expect(400);
+  await request(f.app).post('/plugin/poll').send({ id: start.id, verifier }).expect(202);
+  await request(f.app).get('/plugin/callback').query({ state: start.id, iss: f.config.origin, code: random() }).expect(400);
+  const auth = await browser.get(authorize.pathname + authorize.search).expect(303);
+  const id = new URL(auth.headers.location!, f.config.origin).searchParams.get('request')!;
+  const view = await browser.get(auth.headers.location!).expect(200);
+  const csrf = view.text.match(/name="csrf" value="([^"]+)"/)![1]!;
+  await browser.post('/oauth/link-token').set('Origin', f.config.origin).type('form').send({ request: id, csrf, api_token: pat }).expect(303);
+  const approved = await browser.post('/oauth/approve').set('Origin', f.config.origin).type('form').send({ request: id, csrf, decision: 'approve' }).expect(200);
+  const callback = callbackFromPage(approved);
+  await browser.get(callback.pathname + callback.search).expect(303).expect('Location',f.config.appUrl+'/connect/result?status=connected');
+  const result = await request(f.app).post('/plugin/poll').set('Origin', 'null').send({ id: start.id, verifier }).expect(200);
+  assert.ok(!JSON.stringify(result.body).includes(pat));
+  await request(f.app).post('/plugin/poll').send({ id: start.id, verifier }).expect(400);
+  const bearer = 'Bearer ' + result.body.access_token;
+  await request(f.app).post('/plugin/tool').set('Origin', 'null').set('Authorization', bearer).send({ name: 'list_projects', args: {} }).expect(200);
+  await request(f.app).post('/plugin/tool').set('Authorization', bearer).send({ name: 'send_message', args: {} }).expect(400);
+  const refreshed = await request(f.app).post('/plugin/refresh').send({ refreshToken: result.body.refresh_token }).expect(200);
+  await request(f.app).post('/plugin/revoke').send({ token: refreshed.body.refresh_token }).expect(200);
+  await request(f.app).post('/plugin/tool').set('Authorization', 'Bearer ' + refreshed.body.access_token).send({ name: 'list_projects', args: {} }).expect(401);
+});
+
+test('plugin refuses access and refresh tokens from other OAuth clients', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  const b = await authorize(f); const tokens = (await request(f.app).post('/oauth/token').send(b.body).expect(200)).body;
+  await request(f.app).post('/plugin/tool').set('Authorization', 'Bearer ' + tokens.access_token).send({ name: 'list_projects', args: {} }).expect(401);
+  await request(f.app).post('/plugin/refresh').send({ refreshToken: tokens.refresh_token }).expect(400);
+});
+
+test('a canonical Figma link can safely retry an uncertain response while task creates cannot', async t => {
+  const f=fixture();t.after(()=>f.store.close());
+  const b=await authorize(f,'tasks:write'),tokens=(await request(f.app).post('/oauth/token').send(b.body).expect(200)).body;
+  const identity=f.oauth.authenticate(tokens.access_token),spec=toolSpecs.find(s=>s.name==='link_figma_frame')!;
+  const args=spec.schema.parse({requestId:'15424dd2-441f-477d-b967-ed17e1dfdcf1',taskId:'task-A',url:'https://www.figma.com/design/Abc123?node-id=1-2'});
+  const context={api:f.api,identity,config:f.config,store:f.store,vault:new Vault(f.config.encryptionKey)};
+  f.api.failure=true;await assert.rejects(executeTool(spec,args,context));
+  f.api.failure=false;f.api.respond=()=>({apiLinkFigmaFrame:{id:'link-A',url:args.url}});
+  assert.equal((await executeTool(spec,args,context)).link && f.api.calls.length,2);
+  await executeTool(spec,args,context);assert.equal(f.api.calls.length,2);
+});
+
+test('native Figma handoff requires explicit approval, original browser and nonce, without a second consent form',async t=>{
+ const f=fixture();t.after(()=>f.store.close());f.config.connectUrl=f.config.appUrl+'/settings/integrations?connection=mcp';
+ const verifier=random(),start=(await request(f.app).post('/plugin/start').send({challenge:challenge(verifier)}).expect(200)).body;
+ const url=new URL(start.url),browser=request.agent(f.app);
+ const auth=await browser.get(url.pathname+url.search).expect(303),destination=new URL(auth.headers.location);
+ assert.equal(destination.origin,new URL(f.config.appUrl).origin);assert.equal(destination.pathname,'/connect');assert.equal(destination.searchParams.get('client'),'figma');
+ const id=destination.searchParams.get('request')!,nonce=destination.searchParams.get('nonce')!;
+ const consent='/oauth/consent?request='+id;
+ await browser.get(consent).expect(200); // No native approval, so cannot mint a code.
+ await request(f.app).post('/oauth/link').set('Origin',f.config.appUrl).send({request:id,nonce:random(),apiToken:pat}).expect(400);
+ await request(f.app).post('/oauth/link').set('Origin','https://evil.example').send({request:id,nonce,apiToken:pat}).expect(403);
+ await request(f.app).post('/oauth/link').set('Origin',f.config.appUrl).send({request:id,nonce,apiToken:pat}).expect(200);
+ await request(f.app).get(consent).expect(400); // Copied return URL cannot grant in another browser.
+ const returned=await browser.get(consent).expect(303),callback=new URL(returned.headers.location);
+ assert.equal(callback.pathname,'/plugin/callback');
+ await browser.get(consent).expect(400);
+ await browser.get(callback.pathname+callback.search).expect(303).expect('Location',f.config.appUrl+'/connect/result?status=connected');
+ await request(f.app).post('/plugin/poll').send({id:start.id,verifier}).expect(200);
+});
+test('native Figma cancellation is browser and nonce bound and never issues credentials',async t=>{
+ const f=fixture();t.after(()=>f.store.close());f.config.connectUrl=f.config.appUrl+'/connect';
+ const verifier=random(),start=(await request(f.app).post('/plugin/start').send({challenge:challenge(verifier)}).expect(200)).body;
+ const url=new URL(start.url),browser=request.agent(f.app);
+ const auth=await browser.get(url.pathname+url.search).expect(303),dest=new URL(auth.headers.location),id=dest.searchParams.get('request')!,nonce=dest.searchParams.get('nonce')!;
+ await browser.get('/oauth/cancel').query({request:id,nonce:random()}).expect(400);
+ await request(f.app).get('/oauth/cancel').query({request:id,nonce}).expect(400);
+ const cancelled=await browser.get('/oauth/cancel').query({request:id,nonce}).expect(303),callback=new URL(cancelled.headers.location);
+ await browser.get(callback.pathname+callback.search).expect(303).expect('Location',f.config.appUrl+'/connect/result?status=cancelled');
+ const result=await request(f.app).post('/plugin/poll').send({id:start.id,verifier}).expect(400);assert.equal(result.body.error,'access_denied');
+});
+test('Figma insertion enforces kind-specific read and write permissions; create properties and file bytes are bounded',async t=>{
+ const f=fixture();t.after(()=>f.store.close());const b=await authorize(f,'tasks:read tasks:write');const tokens=(await request(f.app).post('/oauth/token').send(b.body).expect(200)).body;
+ const context={api:f.api,identity:f.oauth.authenticate(tokens.access_token),config:f.config,store:f.store,vault:new Vault(f.config.encryptionKey)};
+ const insert=pluginToolSpecs.find(s=>s.name==='insert_figma_design')!,create=toolSpecs.find(s=>s.name==='create_task')!,upload=pluginToolSpecs.find(s=>s.name==='upload_attachment')!;
+ await assert.rejects(executeTool(insert,insert.schema.parse({requestId:'20df8760-456e-4a26-a452-e130e1739084',kind:'doc',id:'doc-A',url:'https://www.figma.com/design/abcdef?node-id=1-2'}),context),e=>e instanceof ApiError&&e.code==='INSUFFICIENT_SCOPE');
+ const args=create.schema.parse({requestId:'e1c1e548-56ad-4c74-978c-511bde634694',projectId:'project-A',name:'Design',content:'Text',priority:0,assigneeIds:[],startDate:'2026-10-21T12:00:00Z'});
+ await executeTool(create,args,context);assert.deepEqual(f.api.calls.at(-1)!.variables.assigneeIds,[]);assert.equal(f.api.calls.at(-1)!.variables.priority,0);
+ assert.equal(create.schema.safeParse({...args,priority:4}).success,false);
+ assert.equal(upload.schema.safeParse({requestId:args.requestId,projectId:'project-A',name:'large',mimeType:'text/plain',data:'A'.repeat(11184813)}).success,false);
+});
+
+test('plugin helper capabilities stay out of public MCP discovery',()=>{
+ for(const name of ['get_plugin_context','list_doc_folders','list_project_lists','insert_figma_design','upload_attachment']){
+  assert.ok(pluginToolSpecs.some(spec=>spec.name===name));assert.ok(!toolSpecs.some(spec=>spec.name===name));
+ }
+});
+
+test('native connection keeps the existing consent flow for non-Figma MCP clients', async t => {
+  const f = fixture(); t.after(() => f.store.close());
+  f.config.connectUrl = f.config.appUrl + '/settings/integrations?connection=mcp';
+  const b = await begin(f);
+  const pending = f.store.get<{ linkNonce: string }>('pending', b.id)!;
+  const linked = await request(f.app).post('/oauth/link').set('Origin', f.config.appUrl)
+    .send({ request: b.id, nonce: pending.linkNonce, apiToken: pat }).expect(200);
+  assert.equal(linked.body.continueUrl, f.config.origin + '/oauth/consent?request=' + b.id);
+  await request(f.app).get('/oauth/consent').query({ request: b.id }).expect(400);
+  const consent = await b.browser.get('/oauth/consent').query({ request: b.id }).expect(200);
+  assert.ok(consent.text.includes('Review access'));
+  assert.equal(consent.headers.location, undefined);
+  await b.browser.get('/oauth/cancel').query({ request: b.id, nonce: pending.linkNonce }).expect(400);
+  const approved = await b.browser.post('/oauth/approve').set('Origin', f.config.origin).type('form')
+    .send({ request: b.id, csrf: b.csrf, decision: 'approve' }).expect(200);
+  const callback = callbackFromPage(approved);
+  assert.equal(callback.origin + callback.pathname, b.params.redirect_uri);
+  assert.equal(callback.searchParams.get('state'), b.params.state);
+  const tokens = await request(f.app).post('/oauth/token').type('form').send({
+    grant_type: 'authorization_code', client_id: b.client.client_id, resource: f.config.resource,
+    redirect_uri: b.params.redirect_uri, code: callback.searchParams.get('code'), code_verifier: b.verifier,
+  }).expect(200);
+  assert.equal(f.oauth.authenticate(tokens.body.access_token).upstream, pat);
 });

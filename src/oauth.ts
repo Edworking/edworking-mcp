@@ -15,7 +15,7 @@ export class OAuthError extends Error {
 interface Pending {
   id: string; csrf: string; browser: string; linkNonce: string; clientId: string; clientName: string;
   redirect: string; scopes: string[]; state?: string; challenge: string; expires: number;
-  upstream?: string; info?: TokenInfo;
+  upstream?: string; info?: TokenInfo; nativeApproved?: boolean;
 }
 export interface Grant { id: string; clientId: string; scopes: string[]; resource: string; upstream: string; info: TokenInfo; expires: number; revoked?: boolean; }
 interface Credential { grantId: string; clientId: string; resource: string; scopes: string[]; expires: number; used?: boolean; }
@@ -52,14 +52,31 @@ export class OAuth {
   private sendView(res: Response, p: Pending, error?: string) {
     res.type('html').send(this.view(p, error));
   }
-  private returnToClient(res: Response, url: URL) {
+  private returnToClient(res: Response, url: URL, native = false) {
     // End the form submission with a document. A 303 keeps the client's later
     // redirects subject to our form-action policy (e.g. ChatGPT -> Platform).
     // Only the callback validated at /authorize reaches this helper. A normal
     // navigation also lets clients relay to their own UI without allowing our
     // credential forms to post to those additional origins.
     res.clearCookie(this.cookie, { path: '/', httpOnly: true, secure: this.config.production, sameSite: 'lax' });
+    if (native) { res.redirect(303, url.href); return; }
     res.type('html').send(page('Return to your assistant', `<h1>Returning to your assistant</h1><p>Your choice has been saved. If this page does not continue automatically, use the button below.</p><p><a class="button" href="${escape(url.href)}" rel="noreferrer">Return to your assistant</a></p><p><small>If your assistant reports an expired connection, start a new connection there.</small></p>`, `<meta http-equiv="refresh" content="0;url=${escape(url.href)}">`));
+  }
+  private isPlugin(p: Pending) {
+    return p.clientId === this.store.get<{ client_id: string }>('plugin-client', 'figma')?.client_id;
+  }
+  private complete(res: Response, p: Pending) {
+    if (!p.upstream || !p.info) throw deny();
+    const config = this.config;
+    const url = new URL(p.redirect); url.searchParams.set('iss', config.origin); if (p.state !== undefined) url.searchParams.set('state', p.state);
+    const grant: Grant = { id: random(), clientId: p.clientId, scopes: p.scopes, resource: config.resource, upstream: p.upstream, info: p.info, expires: Math.min(Date.parse(p.info.expiresAt), Date.now() + 30 * 86400_000) };
+    const code = random();
+    this.store.transaction(() => {
+      this.pending(p.id); this.store.remove('pending', p.id);
+      this.store.set('grant', grant.id, grant, grant.expires);
+      this.store.set('code', hash(code), { grantId: grant.id, clientId: p.clientId, resource: config.resource, scopes: p.scopes, challenge: p.challenge, redirect: p.redirect, expires: Date.now() + 60_000 }, Date.now() + 600_000);
+    });
+    url.searchParams.set('code', code); this.returnToClient(res, url, this.isPlugin(p) && !!p.nativeApproved);
   }
   private async link(p: Pending, token: string) {
     const info = await this.api.tokenInfo(token);
@@ -87,6 +104,40 @@ export class OAuth {
     this.store.set('access', hash(access), { ...common, expires: Date.now() + seconds * 1000 }, Date.now() + seconds * 1000);
     this.store.set('refresh', hash(refresh), { ...common, expires: grant.expires }, grant.expires);
     return { access_token: access, token_type: 'Bearer', expires_in: seconds, refresh_token: refresh, scope: scopes.join(' ') };
+  }
+  async exchange(body: Record<string, unknown>, authorization?: string) {
+    const clientId = asString(body.client_id), resource = asString(body.resource);
+    if (!clientId || authorization || body.client_secret) throw new OAuthError('invalid_client', 'This server uses public clients with PKCE.', 401);
+    if (resource !== this.config.resource) throw new OAuthError('invalid_target', 'The MCP resource must match the authorization request.');
+    const isCode = body.grant_type === 'authorization_code';
+    if (!isCode && body.grant_type !== 'refresh_token') throw new OAuthError('unsupported_grant_type', 'Use authorization_code or refresh_token.');
+    const kind = isCode ? 'code' : 'refresh', secret = asString(isCode ? body.code : body.refresh_token), key = hash(secret);
+    const record = this.store.get<Code>(kind, key);
+    if (!record || record.clientId !== clientId || record.resource !== resource) throw deny();
+    if (isCode && (!/^[A-Za-z0-9._~-]{43,128}$/.test(asString(body.code_verifier)) || !equal(challenge(asString(body.code_verifier)), record.challenge) || body.redirect_uri !== record.redirect)) throw deny();
+    if (record.used) { this.revokeGrant(record.grantId); throw deny('Credential reuse detected. Reconnect Edworking.'); }
+    const grant = this.store.get<Grant>('grant', record.grantId);
+    if (!grant || grant.revoked || record.expires <= Date.now()) throw deny();
+    const scopes = !isCode && body.scope !== undefined ? parseScopes(body.scope) : record.scopes;
+    if (scopes.some(s => !record.scopes.includes(s))) throw new OAuthError('invalid_scope', 'Refresh cannot expand permissions.');
+    // Verify current owner, workspace membership, revocation, and expiry before refreshing.
+    if (!isCode) {
+      try {
+        const current = await this.api.tokenInfo(this.vault.open(grant.upstream));
+        if (current.id !== grant.info.id || current.userId !== grant.info.userId || current.teamId !== grant.info.teamId || scopes.some(s => !current.scopes.includes(s))) throw new ApiError('UNAUTHORIZED', 'The connection changed.');
+      }
+      catch (e) { if (e instanceof ApiError && e.code === 'UNAUTHORIZED') { this.revokeGrant(grant.id); throw deny('Edworking access was revoked.'); } throw new OAuthError('temporarily_unavailable', 'Edworking is unavailable. Try again later.', 503); }
+    }
+    let replay = false;
+    const result = this.store.transaction(() => {
+      const current = this.store.get<Credential>(kind, key);
+      const latestGrant = this.store.get<Grant>('grant', grant.id);
+      if (!current || !latestGrant || latestGrant.revoked || current.used || current.expires <= Date.now()) { if (current?.used) { this.revokeGrant(grant.id); replay = true; } return undefined; }
+      this.store.set(kind, key, { ...record, used: true }, grant.expires);
+      return this.tokens(latestGrant, scopes);
+    });
+    if (!result) throw deny(replay ? 'Credential reuse detected. Reconnect Edworking.' : undefined);
+    return result;
   }
   private routes() {
     const r = this.router, config = this.config;
@@ -122,9 +173,26 @@ export class OAuth {
       const p: Pending = { id, csrf: random(), browser: hash(session), linkNonce: random(), clientId: client.client_id, clientName: client.client_name, redirect, scopes, state: req.query.state as string | undefined, challenge: asString(req.query.code_challenge), expires };
       this.store.set('pending', id, p, expires);
       res.cookie(this.cookie, session, { httpOnly: true, secure: config.production, sameSite: 'lax', maxAge: 600_000, path: '/' });
+      if (this.isPlugin(p) && config.connectUrl) {
+        const url = new URL(config.connectUrl); url.pathname = '/connect';
+        url.search = new URLSearchParams({ connection: 'mcp', client: 'figma', request: id, nonce: p.linkNonce }).toString();
+        res.redirect(303, url.href); return;
+      }
       res.redirect(303, `/oauth/consent?request=${id}`);
     });
-    r.get('/oauth/consent', (req, res) => { const p = this.pending(asString(req.query.request)); this.browser(req, p); this.sendView(res, p); });
+    r.get('/oauth/consent', (req, res) => {
+      const p = this.pending(asString(req.query.request)); this.browser(req, p);
+      if (this.isPlugin(p) && p.nativeApproved) { this.complete(res, p); return; }
+      this.sendView(res, p);
+    });
+    r.get('/oauth/cancel', (req, res) => {
+      const p = this.pending(asString(req.query.request)); this.browser(req, p);
+      if (!this.isPlugin(p) || !equal(asString(req.query.nonce), p.linkNonce)) throw deny();
+      this.store.remove('pending', p.id);
+      const url = new URL(p.redirect); url.searchParams.set('iss', config.origin); url.searchParams.set('error', 'access_denied');
+      if (p.state) url.searchParams.set('state', p.state);
+      this.returnToClient(res, url, true);
+    });
     r.post('/oauth/link-token', budget(10), async (req, res) => {
       const p = this.pending(asString(req.body.request)); this.browser(req, p, true);
       try { await this.link(p, asString(req.body.api_token)); res.redirect(303, `/oauth/consent?request=${p.id}`); }
@@ -143,6 +211,8 @@ export class OAuth {
       const p = this.pending(asString(req.body.request));
       if (!equal(asString(req.body.nonce), p.linkNonce)) throw deny();
       await this.link(p, asString(req.body.apiToken));
+      const linked = this.pending(p.id);
+      this.store.set('pending', p.id, { ...linked, nativeApproved: true }, p.expires);
       res.json({ continueUrl: `${config.origin}/oauth/consent?request=${p.id}` });
     });
     r.post('/oauth/approve', budget(20), (req, res) => {
@@ -150,49 +220,9 @@ export class OAuth {
       const url = new URL(p.redirect); url.searchParams.set('iss', config.origin); if (p.state !== undefined) url.searchParams.set('state', p.state);
       if (req.body.decision === 'deny') { this.store.remove('pending', p.id); url.searchParams.set('error', 'access_denied'); this.returnToClient(res, url); return; }
       if (req.body.decision !== 'approve' || !p.upstream || !p.info) throw deny('Connect your Edworking workspace first.');
-      const grant: Grant = { id: random(), clientId: p.clientId, scopes: p.scopes, resource: config.resource, upstream: p.upstream, info: p.info, expires: Math.min(Date.parse(p.info.expiresAt), Date.now() + 30 * 86400_000) };
-      const code = random();
-      this.store.transaction(() => {
-        this.pending(p.id); this.store.remove('pending', p.id);
-        this.store.set('grant', grant.id, grant, grant.expires);
-        this.store.set('code', hash(code), { grantId: grant.id, clientId: p.clientId, resource: config.resource, scopes: p.scopes, challenge: p.challenge, redirect: p.redirect, expires: Date.now() + 60_000 }, Date.now() + 600_000);
-      });
-      url.searchParams.set('code', code); this.returnToClient(res, url);
+      this.complete(res, p);
     });
-    r.post('/oauth/token', budget(60), async (req, res) => {
-      const clientId = asString(req.body.client_id), resource = asString(req.body.resource);
-      if (!clientId || req.get('authorization') || req.body.client_secret) throw new OAuthError('invalid_client', 'This server uses public clients with PKCE.', 401);
-      if (resource !== config.resource) throw new OAuthError('invalid_target', 'The MCP resource must match the authorization request.');
-      const isCode = req.body.grant_type === 'authorization_code';
-      if (!isCode && req.body.grant_type !== 'refresh_token') throw new OAuthError('unsupported_grant_type', 'Use authorization_code or refresh_token.');
-      const kind = isCode ? 'code' : 'refresh', secret = asString(isCode ? req.body.code : req.body.refresh_token), key = hash(secret);
-      const record = this.store.get<Code>(kind, key);
-      if (!record || record.clientId !== clientId || record.resource !== resource) throw deny();
-      if (isCode && (!/^[A-Za-z0-9._~-]{43,128}$/.test(asString(req.body.code_verifier)) || !equal(challenge(asString(req.body.code_verifier)), record.challenge) || req.body.redirect_uri !== record.redirect)) throw deny();
-      if (record.used) { this.revokeGrant(record.grantId); throw deny('Credential reuse detected. Reconnect Edworking.'); }
-      const grant = this.store.get<Grant>('grant', record.grantId);
-      if (!grant || grant.revoked || record.expires <= Date.now()) throw deny();
-      const scopes = !isCode && req.body.scope !== undefined ? parseScopes(req.body.scope) : record.scopes;
-      if (scopes.some(s => !record.scopes.includes(s))) throw new OAuthError('invalid_scope', 'Refresh cannot expand permissions.');
-      // Verify current owner, workspace membership, revocation, and expiry before refreshing.
-      if (!isCode) {
-        try {
-          const current = await this.api.tokenInfo(this.vault.open(grant.upstream));
-          if (current.id !== grant.info.id || current.userId !== grant.info.userId || current.teamId !== grant.info.teamId || scopes.some(s => !current.scopes.includes(s))) throw new ApiError('UNAUTHORIZED', 'The connection changed.');
-        }
-        catch (e) { if (e instanceof ApiError && e.code === 'UNAUTHORIZED') { this.revokeGrant(grant.id); throw deny('Edworking access was revoked.'); } throw new OAuthError('temporarily_unavailable', 'Edworking is unavailable. Try again later.', 503); }
-      }
-      let replay = false;
-      const result = this.store.transaction(() => {
-        const current = this.store.get<Credential>(kind, key);
-        const latestGrant = this.store.get<Grant>('grant', grant.id);
-        if (!current || !latestGrant || latestGrant.revoked || current.used || current.expires <= Date.now()) { if (current?.used) { this.revokeGrant(grant.id); replay = true; } return undefined; }
-        this.store.set(kind, key, { ...record, used: true }, grant.expires);
-        return this.tokens(latestGrant, scopes);
-      });
-      if (!result) throw deny(replay ? 'Credential reuse detected. Reconnect Edworking.' : undefined);
-      res.json(result);
-    });
+    r.post('/oauth/token', budget(60), async (req, res) => { res.json(await this.exchange(req.body, req.get('authorization'))); });
     r.post('/oauth/revoke', budget(30), (req, res) => {
       const key = hash(asString(req.body.token));
       const record = this.store.get<Credential>('refresh', key) || this.store.get<Credential>('access', key);

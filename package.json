@@ -26,7 +26,8 @@
     "start": "node dist/index.js",
     "test": "tsx --test test/*.test.ts",
     "check": "npm run typecheck && npm test && npm run build",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "dev:local": "node --env-file=.env.local -e \"require('node:child_process').spawn(process.execPath, ['--run', 'dev'], { stdio: 'inherit' }).on('exit', code => process.exitCode = code)\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Reuse native Edworking consent and revocation for the Figma plugin and MCP clients.
+- Route the fixed Figma client through dedicated Edworking workspace selection, authorization and return, without a duplicate MCP consent screen. Keep browser binding, nonce, PKCE and one-use handoff checks.
+- Add isolated PKCE plugin return/polling and a restricted tool transport; keep general OAuth/MCP origin checks unchanged.
+- Add task/frame linking and lookup tools; reciprocal Figma Dev Resources require no Figma OAuth.
+- Support compact task and document creation (with an optional list or folder), existing-content design insertion and bounded attachment upload through plugin-only helpers; keep the public tool catalog at 24.
+- Reuse scoped content/storage services and ApiToken credentials without schema migrations or Figma REST OAuth.
+- Add an explicit local runner and document testing against local Venusaur/Charizard before deployment.
+
 ## 0.2.0 — richer workspace tools
 
 - Expand the catalog from 15 to 22 tools: project members, Docs list/read/create/rename, and targeted task/Doc content edits.
