@@ -39,7 +39,7 @@ export function createApp(config: Config, store: Store, api = new Edworking(conf
   app.get('/privacy', (_req, res) => res.type('html').send(privacy()));
   app.get('/terms', (_req, res) => res.type('html').send(terms()));
   app.get('/.well-known/openai-apps-challenge', (_req, res) => { if (config.challenge) res.type('text/plain').send(config.challenge); else res.status(404).end(); });
-  app.get('/.well-known/mcp/server-card.json', (_req, res) => res.json({ serverInfo, authentication: { required: true, schemes: ['oauth2'] }, tools: toolSpecs.map(s => ({ name: s.name, description: s.description, inputSchema: z.toJSONSchema(s.schema), outputSchema: z.toJSONSchema(toolOutputSchemas[s.name]!), annotations: { readOnlyHint: !s.write, destructiveHint: !!s.destructive, openWorldHint: !!s.openWorld } })), prompts: [], resources: [] }));
+  app.get('/.well-known/mcp/server-card.json', (_req, res) => res.json({ serverInfo, authentication: { required: true, schemes: ['oauth2'] }, tools: toolSpecs.map(s => ({ name: s.name, description: s.description, inputSchema: z.toJSONSchema(s.schema), outputSchema: z.toJSONSchema(toolOutputSchemas[s.name]!), annotations: { title: s.title, readOnlyHint: !s.write, destructiveHint: !!s.destructive, openWorldHint: !!s.openWorld } })), prompts: [], resources: [] }));
   const challengeHeader = (error?: string) => `Bearer resource_metadata="${config.origin}/.well-known/oauth-protected-resource/mcp", scope="${SCOPES.join(' ')}"${error ? `, error="${error}"` : ''}`;
   app.all('/mcp', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false }), async (req, res) => {
     const authorization = req.get('authorization');

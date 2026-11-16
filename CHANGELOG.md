@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Repeat each tool's title in `annotations.title` (MCP tool list and server card). The Claude Connectors Directory reads the display name from there and flagged all 24 tools without it.
+
 ## 0.3.1 — 2026-11-16
 
 - Add the Edworking logo, website and a description to the server metadata (MCP `serverInfo`, the server card and `server.json`) so registries and clients can display them. Align package, plugin, registry and server metadata at 0.3.1.
