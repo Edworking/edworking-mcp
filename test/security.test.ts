@@ -452,6 +452,10 @@ test('all tools run through the MCP SDK, reject missing scopes and deduplicate w
       assert.equal(f.api.calls.length, before + 1, name + ' retried upstream');
     }
   }
+  const unscopedFiles = f.api.calls.length, noScope = await client.callTool({ name: 'list_files', arguments: {} });
+  assert.equal(noScope.isError, true, 'list_files needs a project or task');
+  assert.match(JSON.stringify(noScope.content), /INVALID_INPUT/);
+  assert.equal(f.api.calls.length, unscopedFiles, 'list_files without a scope stays local');
   for (const name of ['create_task', 'create_doc']) {
     const args = { requestId: 'bac4f7f7-a061-48ce-a787-3347f9b64276', projectId: 'project-A', ...(name === 'create_task' ? { name: 'Figma task' } : { title: 'Figma Doc' }), figmaDesigns: [{ url: 'https://www.figma.com/design/Abc123Abc123Abc123Abc123?node-id=1-2', name: 'Frame' }] };
     const before = f.api.calls.length, result = await client.callTool({ name, arguments: args });
