@@ -1,6 +1,6 @@
 {
   "name": "@edworking/mcp",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "The official Edworking MCP server for tasks, Docs, workspace search, conversations and files",
   "type": "module",
   "license": "MIT",
