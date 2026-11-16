@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "edworking-mcp",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Connect Edworking tasks, Docs, projects, conversations and files to your assistant.",
   "author": {
     "name": "Edworking",
@@ -94,7 +94,7 @@
         }
       },
       "publication": {
-        "release_notes": "Version 0.3.0 adds Figma-aware task and Doc creation, frame-link tools, and support for native Edworking sign-in. It updates vulnerable runtime dependencies. The hosted MCP URL remains https://mcp.edworking.com/mcp. Existing grants retain their permissions; additional scopes require renewed consent."
+        "release_notes": "Version 0.3.1 requests all supported read and write permissions for new connections that omit scopes, fixes connections that use Claude’s published identity, updates the setup page for native Edworking sign-in, and adds the Edworking logo and website to the server metadata. The hosted MCP URL remains https://mcp.edworking.com/mcp. Existing grants retain their permissions; additional scopes require renewed consent."
       }
     }
   }
