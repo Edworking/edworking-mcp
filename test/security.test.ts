@@ -437,6 +437,8 @@ test('all tools run through the MCP SDK, reject missing scopes and deduplicate w
       assert.equal(typeof (field as { description?: unknown }).description, 'string', tool.name + ' parameter guidance');
     }
     assert.deepEqual(publicCard.tools.find((x: { name: string }) => x.name === tool.name).outputSchema.properties, tool.outputSchema.properties, tool.name + ' public metadata parity');
+    assert.ok(tool.title && tool.annotations?.title === tool.title, tool.name + ' directory title annotation');
+    assert.equal(publicCard.tools.find((x: { name: string }) => x.name === tool.name).annotations.title, tool.title, tool.name + ' public title annotation');
   }
   for (const [name, args] of Object.entries(cases)) {
     const before = f.api.calls.length, result = await client.callTool({ name, arguments: args });
