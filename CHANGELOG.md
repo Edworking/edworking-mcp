@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Update the landing page for native Edworking sign-in: the Connect steps now use Continue in Edworking, the connection's token is created for you, and a dedicated API token is the fallback. Add Claude's published-identity setup, list the two Figma frame tools so the page names all 24 tools, and state which clients have real-account connection tests.
 - Request all 11 supported read/write scopes in MCP discovery, authentication challenges and authorization requests that omit scopes. New connections show the full permissions before approval, including native Edworking sign-in. Explicit read-only requests and existing grants stay restricted; reconnect to approve writes. The 24-tool catalog and upstream scope checks are unchanged.
 - Fix Claude connections using its published OAuth identity: accept additional advertised grant capabilities while retaining only authorization-code and refresh-token grants. Preserve public-client PKCE, redirect validation, and strict dynamic registration.
 
