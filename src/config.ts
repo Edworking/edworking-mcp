@@ -1,8 +1,9 @@
 import { z } from 'zod';
 
-export const SCOPES = ['projects:read', 'tasks:read', 'messages:read', 'chats:read', 'files:read', 'tasks:write', 'messages:write', 'projects:write', 'files:write', 'docs:read', 'docs:write'] as const;
+export const SCOPES = ['projects:read', 'tasks:read', 'messages:read', 'chats:read', 'files:read', 'tasks:write', 'messages:write', 'projects:write', 'files:write', 'docs:read', 'docs:write', 'data:read'] as const;
 export const READ_SCOPES = SCOPES.filter(s => s.endsWith(':read'));
 export const scopeLabels: Record<string, string> = {
+  'data:read': 'Read synced workspace data',
   'projects:read': 'Read projects and their statuses', 'tasks:read': 'Read tasks',
   'messages:read': 'Read accessible conversations', 'chats:read': 'List your conversations',
   'files:read': 'Read file information', 'tasks:write': 'Create tasks and edit task fields and descriptions',

@@ -6,10 +6,10 @@ export const tokenInfoSchema = z.object({ id: z.string(), name: z.string(), user
 export type TokenInfo = z.infer<typeof tokenInfoSchema>;
 export class Edworking {
   constructor(private url: string, private request: typeof fetch = fetch) {}
-  async execute<T>(token: string, query: string, variables: Record<string, unknown> = {}): Promise<T> {
+  async execute<T>(token: string, query: string, variables: Record<string, unknown> = {}, timeoutMs = 35_000): Promise<T> {
     let response: Response;
     try {
-      response = await this.request(this.url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(35_000), redirect: 'error' });
+      response = await this.request(this.url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
     } catch { throw new ApiError('UPSTREAM_UNAVAILABLE', 'Edworking did not respond. Check the result before retrying a write.'); }
     if ([401, 403].includes(response.status)) throw new ApiError('UNAUTHORIZED', 'Reconnect Edworking; the connection is expired, revoked, or not permitted.');
     if (response.status === 429) throw new ApiError('RATE_LIMITED', 'Edworking is busy. Wait before trying again.');
