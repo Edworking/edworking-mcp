@@ -88,7 +88,7 @@ const definitions: Spec[] = [
     name: 'list_data_tables', title: 'Discover synced data tables', scopes: ['data:read'],
     description: 'List published BigQuery tables, selected fields and latest sync metadata in the authorized Edworking workspace. Use nextCursor to continue.',
     schema: z.object({ after: z.string().max(256).optional(), limit: z.number().int().min(1).max(25).default(10) }),
-    run: async (args, ctx) => (await query(ctx, 'query($after:ID,$limit:Int){apiDataTables(after:$after,limit:$limit){tables{id stream source connector fields loadedAt lastRows} nextCursor}}', args)).apiDataTables as Row,
+    run: async (args, ctx) => (await query(ctx, 'query($after:ID,$limit:Int){apiDataTables(after:$after,limit:$limit){tables{id stream source connector fields description dictionary{name type format description} keys cursor method parent loadedAt lastRows} nextCursor}}', args)).apiDataTables as Row,
   },
   {
     name: 'query_data_table', title: 'Query a synced data table', scopes: ['data:read'],
