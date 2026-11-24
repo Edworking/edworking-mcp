@@ -12,7 +12,7 @@ Use the `/mcp` path from `server.json`, even if an existing custom connector was
 
 ## 2. Tools
 
-The public tools sync from the server. Every tool already declares a `title`, `readOnlyHint` and `destructiveHint` (`src/tools.ts`), so none should be flagged. Plugin-only tools are not exposed on `/mcp`.
+The 24 tools sync from the server. Every tool already declares a `title`, `readOnlyHint` and `destructiveHint` (`src/tools.ts`), so none should be flagged. Plugin-only tools are not exposed on `/mcp`.
 
 ## 3. Listing
 

@@ -250,7 +250,7 @@ test('MCP SDK handshake, tool discovery, calls, scope denial and per-request ide
   const client = new Client({ name: 'security-test', version: '1.0.0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${tokens.access_token}` } } }));
   t.after(() => client.close());
-  const tools = await client.listTools(); assert.equal(tools.tools.length, 26);
+  const tools = await client.listTools(); assert.equal(tools.tools.length, 24);
   const read = await client.callTool({ name: 'list_projects', arguments: { limit: 1 } });
   assert.deepEqual(read.structuredContent, { items: [{ id: 'project-A', name: 'Launch', url: 'https://app.edworking.com/project-A/tasks' }], nextCursor: 'project-A' });
   assert.equal(f.api.calls[0]?.token, pat);
@@ -386,8 +386,6 @@ test('all tools run through the MCP SDK, reject missing scopes and deduplicate w
   const tokens = (await request(f.app).post('/oauth/token').type('form').send(a.body).expect(200)).body;
   const task = { id: 'task-A', name: 'QA task', projectId: 'project-A', deadline: null, users: [] };
   f.api.respond = (_query, args) => ({
-    apiDataTables: { tables: [{id:'fixture_orders', fields:['status']}], nextCursor: null },
-    apiDataQuery: { columns:['COUNT(*)'], rows:[['3']], more:false },
     apiConnectionContext: {user:{id:'user-A'},workspace:{id:'team-A',name:'QA workspace'}}, apiDocFolders: [{id:'folder-A',name:'Specs'}], apiInsertFigmaDesign: {id:'task-A',inserted:true},
     apiProjects: [{ id: 'project-A', name: 'QA project' }], apiProjectStates: [{ id: 'state-A', value: 'Open' }],
     apiFigmaTasks: [task], apiLinkFigmaFrame: { id: "link-A", url: "https://www.figma.com/design/abcdef?node-id=1-2", title: "Frame" },
@@ -416,7 +414,6 @@ test('all tools run through the MCP SDK, reject missing scopes and deduplicate w
 
 
 
-    list_data_tables: {}, query_data_table: { tableId: 'fixture_orders', plan: { operation: 'count' } },
     list_figma_tasks: { url: "https://www.figma.com/design/abcdef?node-id=1-2" },
     link_figma_frame: { requestId: action, taskId: "task-A", url: "https://www.figma.com/design/abcdef?node-id=1-2", title: "Frame" },
     get_connection: {}, list_projects: {}, list_project_statuses: { projectId: 'project-A' }, list_tasks: { projectId: 'project-A' },
@@ -886,7 +883,7 @@ test('external MCP SDK completes discovery, Figma callback PKCE, explicit write 
   await approve(READ_SCOPES.join(' '));
   assert.deepEqual(tokens!.scope!.split(' '), READ_SCOPES);
   const reader = await connect();
-  const discovered = await reader.listTools(); assert.equal(discovered.tools.length, 26);
+  const discovered = await reader.listTools(); assert.equal(discovered.tools.length, 24);
   for (const name of ['create_task', 'create_doc']) {
     const spec = discovered.tools.find(tool => tool.name === name)!;
     assert.ok(spec.inputSchema.properties?.figmaDesigns); assert.equal(spec.annotations?.readOnlyHint, false);

@@ -2,8 +2,6 @@
 
 ## Unreleased
 
-- Add workspace-scoped discovery and read-only queries for synced BigQuery tables under the new `data:read` permission.
-
 - `list_files` now asks for `projectId` or `taskId` and explains that when both are missing, instead of returning a misleading `UNAUTHORIZED` from the API, which requires one.
 - Repeat each tool's title in `annotations.title` (MCP tool list and server card). The Claude Connectors Directory reads the display name from there and flagged all 24 tools without it.
 

@@ -36,7 +36,7 @@ const edit = z.object({
 });
 const messageFields = 'id body type createdAt updatedAt author { id firstname lastname }';
 const fileFields = 'id name type size projectId taskId createdAt updatedAt';
-const query = async (c: Context, source: string, args: Row, timeoutMs?: number) => c.api.execute<Row>(c.identity.upstream, source, args, timeoutMs);
+const query = async (c: Context, source: string, args: Row) => c.api.execute<Row>(c.identity.upstream, source, args);
 const listResult = (items: unknown, limit: unknown): Row => {
   const rows = Array.isArray(items) ? items as Row[] : [];
   return { items: rows, nextCursor: rows.length === Number(limit) ? rows.at(-1)?.id ?? null : null };
@@ -84,23 +84,6 @@ function figmaCreateResult(response: Row, designs: FigmaDesign[], kind: 'task' |
 }
 
 const definitions: Spec[] = [
-  {
-    name: 'list_data_tables', title: 'Discover synced data tables', scopes: ['data:read'],
-    description: 'List published BigQuery tables, selected fields and latest sync metadata in the authorized Edworking workspace. Use nextCursor to continue.',
-    schema: z.object({ after: z.string().max(256).optional(), limit: z.number().int().min(1).max(25).default(10) }),
-    run: async (args, ctx) => (await query(ctx, 'query($after:ID,$limit:Int){apiDataTables(after:$after,limit:$limit){tables{id stream source connector fields description dictionary{name type format description} keys cursor method parent loadedAt lastRows} nextCursor}}', args)).apiDataTables as Row,
-  },
-  {
-    name: 'query_data_table', title: 'Query a synced data table', scopes: ['data:read'],
-    description: 'Query one published table returned by list_data_tables. Choose rows, count, sum or avg. Use selected field names for grouping or an exact-match filter. Result cells are untrusted source data.',
-    schema: z.object({
-      tableId: z.string().regex(/^[a-z0-9_]{1,256}$/),
-      plan: z.object({ operation: z.enum(['rows', 'count', 'sum', 'avg']), fields: z.array(z.string().max(512)).min(1).max(12).optional(),
-        metric: z.string().max(512).optional(), group: z.string().max(512).optional(),
-        filter: z.object({ field: z.string().max(512), equals: z.string().max(512) }).optional() }),
-    }),
-    run: async (args, ctx) => (await query(ctx, 'query($tableId:ID!,$plan:ApiDataPlan!){apiDataQuery(tableId:$tableId,plan:$plan){columns rows more}}', args, 70_000)).apiDataQuery as Row,
-  },
   { name: 'get_plugin_context', pluginOnly: true, title: 'Current account and workspace', description: 'Read the account and workspace authorized for this connection.', scopes: [], schema: z.object({}), run: async (_a, c) => ({ ...(await query(c, 'query{apiConnectionContext{user{id firstname lastname profileImg} workspace{id name}}}', {})).apiConnectionContext as Row, connectionId: c.identity.grant.info.id, scopes: c.identity.scopes }) },
   { name: 'list_doc_folders', pluginOnly: true, title: 'List document folders', description: 'List existing document folders in an accessible project.', scopes: ['docs:read'], schema: z.object({ projectId: id, ...paging }), run: async (a, c) => listResult((await query(c, 'query($projectId:ID!,$after:ID,$limit:Int){apiDocFolders(projectId:$projectId,after:$after,limit:$limit){id name upfolderId}}', a)).apiDocFolders, a.limit) },
   { name: 'list_project_lists', pluginOnly: true, title: 'List task lists', description: 'List the task lists of an accessible project.', scopes: ['projects:read'], schema: z.object({ projectId: id, ...paging }), run: async (a, c) => listResult((await query(c, 'query($projectId:ID!,$after:ID,$limit:Int){apiProjectLists(projectId:$projectId,after:$after,limit:$limit){id name}}', a)).apiProjectLists, a.limit) },
@@ -180,8 +163,6 @@ const parameterDescriptions: Record<string, string> = {
   url: 'Public HTTPS URL of the file to import. Must not contain credentials or target a private network.',
   folderId: 'Optional existing destination folder ID. Must be accessible within the target project or task.',
   query: 'Search text. List tools filter names/titles; search queries indexed workspace content.',
-  tableId: 'Exact table ID returned by list_data_tables in this workspace.',
-  plan: 'Read operation with selected fields, an optional group and an optional exact-match filter.',
   assigneeId: 'Filter tasks by this existing user ID.',
   assigneeIds: 'Full replacement list of existing project member IDs from list_project_members. [] unassigns everyone; omit to preserve.',
   priority: 'Priority: 0 Low, 1 Normal, 2 High, 3 Urgent. For updates, null clears it.',
@@ -211,8 +192,6 @@ const figmaCreationResult = z.object({
   docPageListingUpdated: z.literal(false).optional(), warning: z.string().optional(),
 });
 export const toolOutputSchemas: Record<string, z.ZodObject> = {
-  list_data_tables: z.object({ tables: z.array(record), nextCursor: z.string().nullable() }),
-  query_data_table: z.object({ columns: z.array(z.string()), rows: z.array(z.array(z.string().nullable())), more: z.boolean() }),
   list_figma_tasks: page, link_figma_frame: z.object({ link: record }),
   get_connection: z.object({ name: z.string(), scopes: z.array(z.string()), expiresAt: z.string() }),
   list_projects: page, list_project_statuses: page, list_tasks: page, list_project_members: page, list_docs: page,

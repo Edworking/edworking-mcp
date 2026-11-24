@@ -8,12 +8,6 @@ The official, open-source [Edworking](https://edworking.com) MCP server. Connect
 - **Setup guide:** [edworking.com/integrations/mcp](https://edworking.com/integrations/mcp)
 - **Privacy:** [mcp.edworking.com/privacy](https://mcp.edworking.com/privacy) · **Terms:** [mcp.edworking.com/terms](https://mcp.edworking.com/terms)
 
-## Synced workspace data
-
-Authorize **Read synced workspace data** to use EdDataVolt in an MCP client. In Edworking, open **More → Data → Connectors**, select fields and wait for the first successful sync. The workspace role needs permission to manage integrations. On an existing connection, reconnect to approve the new permission.
-
-Use `list_data_tables` to discover tables, selected fields and their last successful sync. Use `query_data_table` to read rows or request a count, sum or average, optionally grouped or filtered by a selected field. For example, ask “How many orders are there by financial status?” Only the authorized workspace is available to the connection.
-
 ## What you can do
 
 - **Find the work:** browse projects, statuses, members and filtered tasks. Search indexed tasks, Docs, files and project messages, and open a result with its link.
